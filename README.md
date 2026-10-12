@@ -21,6 +21,24 @@ The taste signals come from [Qloo](https://www.qloo.com/): pairwise audience ove
 
 Every Qloo call is recorded in a redacted trace (`src/qloo/trace.ts`) for the request-to-result walkthrough.
 
+## The app
+
+`npm run dev` serves the API and UI at http://localhost:8080. Pick a library, plan the channel and watch the Qloo calls
+stream in. Then drag shows (or use ↑ ↓) to try your own order: every handoff is re-scored, and weak ones turn red.
+The side panel has weak dayparts with titles to license, the overlap heatmap, and the full Qloo call trace.
+
+| Route | What it does |
+|---|---|
+| `GET /api/presets` | Demo libraries |
+| `POST /api/plans` | `{library:[{name, runtimeMinutes?}], matrix?}` → NDJSON stream: one `trace` line per Qloo call, then the `plan` |
+| `POST /api/plans/:id/score` | `{sequence:[showId…]}` (a reorder of the plan) → re-scored slots and any rule violations |
+| `GET /api/health` | Liveness, plus whether data is synthetic |
+
+The API is public and unauthenticated so judges can use it directly. To make that safe, request bodies are capped at
+16 KB and libraries at 40 shows (16 for the pairwise matrix). Each client gets a planning rate limit, at most 3 plans run
+at once, each run is time-limited, and Qloo answers are cached (bounded LRU) so reloads spend no quota.
+Missing runtimes are looked up on TMDB when `TMDB_READ_ACCESS_TOKEN` is set.
+
 ## Run it
 
 Requires Node ≥ 22.19.
@@ -30,6 +48,8 @@ npm install
 npm test            # unit tests (solver checked against brute force)
 npm run demo        # 24h grid on the synthetic library (add -- --recommend for the recommend matrix)
 npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
+npm run dev         # API + UI on :8080
+docker build -t lead-in . && docker run -p 8080:8080 lead-in
 ```
 
 ## Data and privacy

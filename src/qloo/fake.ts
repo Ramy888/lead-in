@@ -57,6 +57,9 @@ function cosine(a: Features, b: Features): number {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
+/** Non-negative features make every cosine look similar; stretch so cross-genre pairs read as weak. */
+const contrast = (cos: number) => Math.max(0, (cos - 0.35) / 0.65);
+
 function find(entity: Entity): Synthetic | undefined {
   return CATALOG.find((s) => idOf(s.name) === entity.id);
 }
@@ -92,7 +95,7 @@ export class FakeQlooClient implements QlooClient {
     const exclude = new Set(signals.map((s) => s.id));
     // Popular titles get a lift in recommendation lists; that is what makes affinity asymmetric.
     const recs = CATALOG.filter((s) => !exclude.has(idOf(s.name)))
-      .map((s) => ({ entity: toEntity(s), affinity: round(cosine(taste, s.f) * (0.6 + 0.4 * s.popularity)) }))
+      .map((s) => ({ entity: toEntity(s), affinity: round(contrast(cosine(taste, s.f)) * (0.6 + 0.4 * s.popularity)) }))
       .sort((a, b) => b.affinity - a.affinity)
       .slice(0, limit);
     return { status: recs.length ? "ok" : "empty", data: recs };
@@ -118,6 +121,6 @@ export class FakeQlooClient implements QlooClient {
   async compareAudiences(a: Entity[], b: Entity[]): Promise<Envelope<CompareResult>> {
     const fa = blend(a), fb = blend(b);
     if (!fa || !fb) return { status: "empty" };
-    return { status: "ok", data: { overlap: round(cosine(fa, fb)) } };
+    return { status: "ok", data: { overlap: round(contrast(cosine(fa, fb))) } };
   }
 }

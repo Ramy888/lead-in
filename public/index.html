@@ -1,1 +1,101 @@
-<!doctype html><title>Lead-In</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lead-In</title>
+  <meta name="description" content="Program a FAST channel by audience flow: every show hands its audience to the next.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>Lead-In</h1>
+        <p class="tagline">Program a FAST channel by audience flow: every show hands its audience to the next.</p>
+      </div>
+    </div>
+    <div id="source-badge" class="badge" hidden></div>
+  </header>
+
+  <main class="layout">
+    <section class="setup panel" aria-labelledby="setup-title">
+      <h2 id="setup-title">1 · Your library</h2>
+      <div id="presets" class="presets" role="radiogroup" aria-label="Demo libraries"></div>
+
+      <ul id="library" class="library" aria-label="Shows in the library"></ul>
+      <form id="add-show" class="add-show">
+        <label class="sr-only" for="new-name">Show title</label>
+        <input id="new-name" placeholder="Add a show title" maxlength="100" autocomplete="off">
+        <label class="sr-only" for="new-runtime">Episode minutes</label>
+        <input id="new-runtime" type="number" min="5" max="240" placeholder="min" title="Episode runtime in minutes; leave blank to look it up on TMDB">
+        <button type="submit" class="ghost">Add</button>
+      </form>
+
+      <fieldset class="matrix-mode">
+        <legend>Audience-overlap source</legend>
+        <label><input type="radio" name="matrix" value="auto" checked> Auto</label>
+        <label><input type="radio" name="matrix" value="compare"> Pairwise compare</label>
+        <label><input type="radio" name="matrix" value="recommend"> Recommend affinity</label>
+      </fieldset>
+
+      <button id="plan-btn" class="primary">Plan the 24h channel</button>
+      <div id="progress" class="progress" aria-live="polite"></div>
+      <div id="needs-input" class="needs-input" aria-live="polite"></div>
+    </section>
+
+    <section class="schedule panel" aria-labelledby="schedule-title">
+      <div class="schedule-head">
+        <h2 id="schedule-title">2 · The day</h2>
+        <div id="flow" class="flow" aria-live="polite"></div>
+      </div>
+      <div id="strip" class="strip" aria-hidden="true"></div>
+      <div id="violations" class="violations" aria-live="polite"></div>
+      <p id="schedule-hint" class="hint">Pick a library and plan the channel. Then drag shows to try your own order, and Lead-In re-scores every handoff.</p>
+      <ol id="grid" class="grid"></ol>
+      <button id="reset-btn" class="ghost" hidden>Back to Lead-In's plan</button>
+    </section>
+
+    <aside class="insights panel" aria-labelledby="insights-title">
+      <h2 id="insights-title" class="sr-only">Insights</h2>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="gaps">Gaps &amp; licensing</button>
+        <button role="tab" aria-selected="false" data-tab="matrix">Overlap matrix</button>
+        <button role="tab" aria-selected="false" data-tab="trace">Qloo calls</button>
+        <button role="tab" aria-selected="false" data-tab="how">How it works</button>
+      </div>
+      <div id="tab-gaps" class="tab" role="tabpanel"></div>
+      <div id="tab-matrix" class="tab" role="tabpanel" hidden></div>
+      <div id="tab-trace" class="tab" role="tabpanel" hidden></div>
+      <div id="tab-how" class="tab" role="tabpanel" hidden>
+        <h3>What comes from where</h3>
+        <dl class="legend">
+          <dt><span class="tag qloo">Qloo says</span></dt>
+          <dd>Audience overlap between shows, each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
+          <dt><span class="tag ours">Our read</span></dt>
+          <dd>Who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
+          <dt><span class="tag tmdb">TMDB</span></dt>
+          <dd>Episode runtimes, which set slot lengths (runtime plus about 12% ad load, rounded up to half hours).</dd>
+        </dl>
+        <h3>How the day is built</h3>
+        <ol class="steps">
+          <li>Resolve each title to a Qloo entity. Ambiguous titles ask you to choose.</li>
+          <li>Get each show's audience skew and score its fit for every daypart.</li>
+          <li>Build a one-way overlap matrix: how much of show A's audience stays for show B.</li>
+          <li>Search for the 24h loop with the best total of handoffs plus daypart fit. Every show airs at least once (when the library fits), and runs of the same show are capped.</li>
+          <li>Flag weak handoffs and dayparts the library serves poorly, then ask Qloo which titles would fill them.</li>
+        </ol>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    <p>Qloo results are aggregate audience affinities, never facts about any individual viewer. No personal data is sent to Qloo.</p>
+    <p>TV data from <a href="https://www.themoviedb.org/" rel="noopener">TMDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+  </footer>
+</body>
+</html>
