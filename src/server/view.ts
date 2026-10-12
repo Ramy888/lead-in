@@ -22,10 +22,12 @@ export function slotViews(plan: Plan, slots: Slot[]): SlotView[] {
   }));
 }
 
-/** Mean handoff across the day: the single "audience flow" number the UI headlines. */
+/** Mean handoff between different shows: the "audience flow" number the UI headlines. Stacked episodes are
+ *  left out so a stack-heavy day can't look better than its real handoffs. */
 export function flowScore(slots: Slot[]): number {
-  if (!slots.length) return 0;
-  return Math.round((slots.reduce((t, s) => t + s.handoffScore, 0) / slots.length) * 1000) / 1000;
+  const handoffs = slots.filter((s, i) => s.showId !== slots[(i + 1) % slots.length]!.showId);
+  if (!handoffs.length) return 0;
+  return Math.round((handoffs.reduce((t, s) => t + s.handoffScore, 0) / handoffs.length) * 1000) / 1000;
 }
 
 export function planView(id: string, plan: Plan, trace: TraceEntry[]) {

@@ -152,14 +152,19 @@ export function createApp(opts: AppOptions): Server {
     running++;
     // NDJSON stream: one line per Qloo call as it completes, then the plan.
     res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", ...SECURITY_HEADERS });
-    const write = (line: unknown) => res.write(JSON.stringify(line) + "\n");
+    const write = (line: unknown) => {
+      if (!res.writableEnded) res.write(JSON.stringify(line) + "\n");
+    };
     const client = new TracingClient(opts.qloo, (entry) => write({ type: "trace", entry }));
     let timer: NodeJS.Timeout | undefined;
     try {
       const library = await withRuntimes(request.library);
       const matrix = request.matrix ?? (library.length <= maxCompare ? "compare" : "recommend");
       const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Planning took too long")), planTimeout);
+        timer = setTimeout(() => {
+          client.cancel();
+          reject(new Error("Planning took too long"));
+        }, planTimeout);
       });
       const plan = await Promise.race([planDay(client, library, { matrix }), timeout]);
       const id = randomUUID();

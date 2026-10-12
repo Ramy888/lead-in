@@ -172,7 +172,7 @@ function renderFlow(prev) {
   const flow = state.view.flow;
   const base = state.plan.schedule.flow;
   const delta = Math.round((flow - base) * 1000) / 1000;
-  const parts = [h("span", { class: "label" }, "Audience flow"), h("span", { class: "value", title: "Mean handoff score across the day" }, fmt(flow))];
+  const parts = [h("span", { class: "label" }, "Audience flow"), h("span", { class: "value", title: "Mean handoff score between different shows (stacked episodes excluded)" }, fmt(flow))];
   if (Math.abs(delta) >= 0.001) parts.push(h("span", { class: "delta " + (delta > 0 ? "up" : "down") }, `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(3)} vs Lead-In`));
   $("#flow").replaceChildren(...parts);
 }

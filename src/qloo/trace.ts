@@ -35,6 +35,7 @@ function countOf(env: Envelope<unknown>): number {
 
 export class TracingClient implements QlooClient {
   readonly trace: TraceEntry[] = [];
+  private cancelled = false;
 
   constructor(
     private readonly inner: QlooClient,
@@ -46,7 +47,13 @@ export class TracingClient implements QlooClient {
     return this.inner.synthetic ?? false;
   }
 
+  /** Refuse further calls: a timed-out plan must stop spending Qloo quota. */
+  cancel(): void {
+    this.cancelled = true;
+  }
+
   private async record<T>(tool: QlooTool, params: unknown, call: () => Promise<Envelope<T>>): Promise<Envelope<T>> {
+    if (this.cancelled) throw new Error("Planning cancelled");
     const started = performance.now();
     const env = await call();
     const entry: TraceEntry = {

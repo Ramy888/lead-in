@@ -93,3 +93,35 @@ describe("API", () => {
     expect((await fetch(`${base}/%2e%2e/package.json`)).status).toBe(404);
   });
 });
+
+describe("API resilience", () => {
+  it("stops calling Qloo once a plan times out, and keeps serving", async () => {
+    const fake = new FakeQlooClient();
+    let describes = 0;
+    const slow = {
+      synthetic: true,
+      describe: async (n: string, t: "tv_show") => { describes++; await new Promise((r) => setTimeout(r, 60)); return fake.describe(n, t); },
+      recommend: fake.recommend.bind(fake),
+      audienceDemographics: fake.audienceDemographics.bind(fake),
+      compareAudiences: fake.compareAudiences.bind(fake),
+    };
+    const base = await start({ qloo: slow, planTimeoutMs: 100 });
+    const { lines } = await plan(base, { library: LIB });
+    expect(lines.at(-1)).toMatchObject({ type: "error" });
+    const atTimeout = describes;
+    await new Promise((r) => setTimeout(r, 500));
+    // At most the call already in flight finishes; no new Qloo calls start after the timeout.
+    expect(describes).toBe(atTimeout);
+    expect(describes).toBeLessThan(LIB.length);
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
+  });
+});
+
+describe("flowScore", () => {
+  it("ignores stacked episodes", async () => {
+    const { flowScore } = await import("../src/server/view.js");
+    const slot = (showId: string, handoffScore: number) => ({ showId, startUnit: 0, units: 1, fit: 0.5, handoffScore, weakHandoff: false });
+    // A→A is a stack (0.6), A→B 0.2, B→A 0.4: flow is the mean of the real handoffs only.
+    expect(flowScore([slot("A", 0.6), slot("A", 0.2), slot("B", 0.4)])).toBe(0.3);
+  });
+});
