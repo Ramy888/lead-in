@@ -28,6 +28,8 @@ export interface Envelope<T> {
   data?: T;
   candidates?: Candidate[];
   error?: { code: string; message: string; recovery?: string };
+  /** Set by CachingClient when the answer came from cache rather than a fresh Qloo call. */
+  cached?: boolean;
 }
 
 export interface Entity {

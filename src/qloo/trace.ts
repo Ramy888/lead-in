@@ -9,6 +9,7 @@ export interface TraceEntry {
   status: Envelope<unknown>["status"];
   ms: number;
   resultCount: number;
+  cached?: boolean;
   errorCode?: string;
 }
 
@@ -35,7 +36,11 @@ function countOf(env: Envelope<unknown>): number {
 export class TracingClient implements QlooClient {
   readonly trace: TraceEntry[] = [];
 
-  constructor(private readonly inner: QlooClient) {}
+  constructor(
+    private readonly inner: QlooClient,
+    /** Called as each call completes, so progress can stream to the UI. */
+    private readonly onEntry?: (entry: TraceEntry) => void,
+  ) {}
 
   get synthetic(): boolean {
     return this.inner.synthetic ?? false;
@@ -44,14 +49,17 @@ export class TracingClient implements QlooClient {
   private async record<T>(tool: QlooTool, params: unknown, call: () => Promise<Envelope<T>>): Promise<Envelope<T>> {
     const started = performance.now();
     const env = await call();
-    this.trace.push({
+    const entry: TraceEntry = {
       tool,
       params: redact(params),
       status: env.status,
       ms: Math.round(performance.now() - started),
       resultCount: countOf(env),
+      ...(env.cached ? { cached: true } : {}),
       ...(env.error ? { errorCode: env.error.code } : {}),
-    });
+    };
+    this.trace.push(entry);
+    this.onEntry?.(entry);
     return env;
   }
 

@@ -4,7 +4,7 @@
 import { fromCompare, fromRecommend, type OverlapMatrix } from "./matrix/overlap.js";
 import type { Candidate, Demographics, Entity, QlooClient } from "./qloo/types.js";
 import { DAYPARTS, DEFAULT_CLOCK, demographicFit, fitFunction, weakDayparts, type DaypartGap } from "./solver/dayparts.js";
-import { solve, type SolveResult, type SolverShow } from "./solver/solve.js";
+import { solve, type SolveResult, type SolverInput, type SolverShow } from "./solver/solve.js";
 
 export interface LibraryItem {
   name: string;
@@ -40,6 +40,10 @@ export interface Plan {
   shows: Array<Entity & { units: number; runtimeMinutes: number }>;
   unresolved: Array<{ name: string; status: string; candidates?: Candidate[] }>;
   matrix: OverlapMatrix;
+  /** Qloo audience skew per show (undefined where Qloo had none). */
+  demographics: Map<string, Demographics | undefined>;
+  /** What the solver ran on, kept so an edited day can be re-scored the same way. */
+  solverInput: SolverInput;
   schedule: SolveResult;
   /** Shows left off the grid: only possible when the library has more airtime than a day. */
   notAired: string[];
@@ -77,7 +81,7 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
   const neededAirings = libraryUnits ? Math.ceil(dayUnits / libraryUnits) + 1 : 0;
   // Airing everything at least once is only possible when the whole library fits in a day.
   const minAirings = libraryUnits <= dayUnits ? (opts.minAirings ?? 1) : 0;
-  const schedule = solve({
+  const solverInput: SolverInput = {
     shows: solverShows,
     dayUnits,
     handoff: (a, b) => matrix.score(a, b),
@@ -86,7 +90,8 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     minAirings,
     maxStack: opts.maxStack ?? 2,
     stackScore: 0.6,
-  }, { budgetMs: opts.budgetMs ?? 1500 });
+  };
+  const schedule = solve(solverInput, { budgetMs: opts.budgetMs ?? 1500 });
   const aired = new Set(schedule.slots.map((s) => s.showId));
   const notAired = shows.filter((s) => !aired.has(s.id)).map((s) => s.id);
   const gaps = weakDayparts(schedule.slots, opts.gapThreshold ?? 0.5);
@@ -108,5 +113,5 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     }
   }
 
-  return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, schedule, notAired, gaps, license };
+  return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, demographics, solverInput, schedule, notAired, gaps, license };
 }
