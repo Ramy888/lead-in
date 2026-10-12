@@ -57,6 +57,8 @@ export interface CompareResult {
 
 /** The subset of tools Lead-In uses, typed. Real and fake clients both implement this. */
 export interface QlooClient {
+  /** True when results are invented stand-ins, not Qloo data. Matrix edges and the UI carry this through. */
+  readonly synthetic?: boolean;
   describe(name: string, type: Entity["type"]): Promise<Envelope<Entity>>;
   recommend(signals: Entity[], targetType: Entity["type"], limit: number): Promise<Envelope<Recommendation[]>>;
   audienceDemographics(entity: Entity): Promise<Envelope<Demographics>>;

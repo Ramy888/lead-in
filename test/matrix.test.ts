@@ -46,9 +46,15 @@ describe("fromCompare", () => {
     const [col, msw, bay] = ids.map((e) => e.data!);
     const m = await fromCompare(fake, [col!, msw!, bay!]);
     expect(m.get(col!.id, msw!.id)!.score).toBe(m.get(msw!.id, col!.id)!.score);
-    expect(m.get(col!.id, msw!.id)!.provenance).toBe("compare");
+    // Fake data must never be labelled as Qloo's.
+    expect(m.get(col!.id, msw!.id)!.provenance).toBe("synthetic");
     // The synthetic data must keep the day-1 intuition: a close pair beats a far pair.
     expect(m.get(col!.id, msw!.id)!.score).toBeGreaterThan(m.get(col!.id, bay!.id)!.score);
+  });
+
+  it("labels edges from a real client as compare", async () => {
+    const m = await fromCompare(scripted({}), [A, B]);
+    expect(m.get("A", "B")).toMatchObject({ score: 0.5, provenance: "compare" });
   });
 
   it("never stores a self edge", async () => {

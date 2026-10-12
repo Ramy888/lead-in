@@ -29,7 +29,8 @@ const plan = await planDay(client, LIBRARY, { matrix: mode });
 const ms = Math.round(performance.now() - started);
 
 const name = new Map(plan.shows.map((s) => [s.id, s.name]));
-console.log(`LEAD-IN — 24h grid (matrix: ${mode}; SYNTHETIC Qloo data, not real affinities) — solved in ${ms} ms\n`);
+const source = plan.synthetic ? "SYNTHETIC stand-in data, not real Qloo affinities" : "Qloo data";
+console.log(`LEAD-IN — 24h grid (matrix: ${mode}; ${source}) — solved in ${ms} ms\n`);
 plan.schedule.slots.forEach((slot, i) => {
   const next = plan.schedule.slots[(i + 1) % plan.schedule.slots.length]!;
   const arrow = slot.showId === next.showId ? "  (stacked)" : `  → ${slot.handoffScore.toFixed(2)}${slot.weakHandoff ? "  WEAK HANDOFF" : ""}`;

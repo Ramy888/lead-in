@@ -33,6 +33,8 @@ export interface LicenseSuggestion {
 }
 
 export interface Plan {
+  /** True when the Qloo data behind this plan is synthetic; the UI must say so. */
+  synthetic: boolean;
   shows: Array<Entity & { units: number; runtimeMinutes: number }>;
   unresolved: Array<{ name: string; status: string; candidates?: Candidate[] }>;
   matrix: OverlapMatrix;
@@ -98,5 +100,5 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     }
   }
 
-  return { shows, unresolved, matrix, schedule, gaps, license };
+  return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, schedule, gaps, license };
 }

@@ -24,6 +24,7 @@ describe("planDay", () => {
     expect(plan.shows.every((s) => aired.has(s.id))).toBe(true);
     expect(plan.unresolved).toMatchObject([{ name: "Law", status: "needs_input" }]);
     expect(plan.schedule.slots.reduce((n, s) => n + s.units, 0)).toBe(48);
+    expect(plan.synthetic).toBe(true);
   });
 
   it("suggests only titles outside the library for weak dayparts", async () => {

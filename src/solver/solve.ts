@@ -86,13 +86,14 @@ export function scoreSequence(inp: SolverInput, seq: string[]): number | null {
 
 /** Can `remaining` units be filled exactly with the airings left, while still airing every show its
  *  minimum? (Owed airtime first, then bounded-knapsack reachability for the rest.) */
-function canFill(inp: SolverInput, remaining: number, used: Map<string, number>): boolean {
+export function canFill(inp: SolverInput, remaining: number, used: Map<string, number>): boolean {
   const min = inp.minAirings ?? 0;
   const owed = inp.shows.reduce((t, s) => t + Math.max(0, min - (used.get(s.id) ?? 0)) * s.units, 0);
   if (owed > remaining) return false;
-  let reach = new Set([0]);
+  // Owed airings are spent up front; only the airings beyond each show's minimum are optional.
+  let reach = new Set([owed]);
   for (const show of inp.shows) {
-    const left = inp.maxAirings - (used.get(show.id) ?? 0);
+    const left = inp.maxAirings - Math.max(used.get(show.id) ?? 0, min);
     for (let k = 0; k < left; k++) {
       const next = new Set(reach);
       for (const r of reach) if (r + show.units <= remaining) next.add(r + show.units);

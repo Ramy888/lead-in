@@ -40,6 +40,7 @@ const USABLE: EnvelopeStatus[] = ["ok", "partial", "degraded", "empty"];
 
 export async function fromRecommend(client: QlooClient, shows: Entity[], limit = 50): Promise<OverlapMatrix> {
   const m = new OverlapMatrix(shows.map((s) => s.id));
+  const provenance: Provenance = client.synthetic ? "synthetic" : "recommend";
   for (const from of shows) {
     const res = await client.recommend([from], "tv_show", limit);
     if (!USABLE.includes(res.status)) {
@@ -47,13 +48,14 @@ export async function fromRecommend(client: QlooClient, shows: Entity[], limit =
       continue;
     }
     const affinity = new Map((res.data ?? []).map((r) => [r.entity.id, r.affinity]));
-    for (const to of shows) m.set(from.id, to.id, { score: affinity.get(to.id) ?? 0, provenance: "recommend" });
+    for (const to of shows) m.set(from.id, to.id, { score: affinity.get(to.id) ?? 0, provenance });
   }
   return m;
 }
 
 export async function fromCompare(client: QlooClient, shows: Entity[]): Promise<OverlapMatrix> {
   const m = new OverlapMatrix(shows.map((s) => s.id));
+  const provenance: Provenance = client.synthetic ? "synthetic" : "compare";
   for (let i = 0; i < shows.length; i++) {
     for (let j = i + 1; j < shows.length; j++) {
       const a = shows[i]!, b = shows[j]!;
@@ -62,7 +64,7 @@ export async function fromCompare(client: QlooClient, shows: Entity[]): Promise<
         m.failures.push({ from: a.id, to: b.id, status: res.status });
         continue;
       }
-      const edge: Edge = { score: res.data!.overlap, provenance: "compare" };
+      const edge: Edge = { score: res.data!.overlap, provenance };
       m.set(a.id, b.id, edge);
       m.set(b.id, a.id, edge);
     }

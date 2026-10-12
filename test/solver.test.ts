@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { solve, scoreSequence, type SolverInput, type SolverShow } from "../src/solver/solve.js";
+import { canFill, solve, scoreSequence, type SolverInput, type SolverShow } from "../src/solver/solve.js";
 
 /** Deterministic PRNG so the random instances are the same on every run. */
 function rng(seed: number) {
@@ -111,5 +111,16 @@ describe("scoreSequence", () => {
   it("rejects a sequence that breaks a constraint", () => {
     const inp = input([{ id: "A", units: 1 }, { id: "B", units: 1 }], {}, { dayUnits: 4, maxStack: 1 });
     expect(scoreSequence(inp, ["A", "A", "B", "B"])).toBeNull();
+  });
+});
+
+describe("canFill", () => {
+  it("counts owed airings toward the remainder, not just raw reachability", () => {
+    // C still owes one 2-unit airing; 3 units left means C + a 1-unit show, and no show is 1 unit long.
+    // Raw reachability says yes (E is 3 units), but E alone would leave C unaired.
+    const shows = [{ id: "C", units: 2 }, { id: "D", units: 2 }, { id: "E", units: 3 }];
+    const inp = input(shows, {}, { dayUnits: 10, minAirings: 1, maxAirings: 3 });
+    expect(canFill(inp, 3, new Map([["D", 1], ["E", 1]]))).toBe(false);
+    expect(canFill(inp, 5, new Map([["D", 1], ["E", 1]]))).toBe(true);
   });
 });

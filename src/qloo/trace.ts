@@ -37,6 +37,10 @@ export class TracingClient implements QlooClient {
 
   constructor(private readonly inner: QlooClient) {}
 
+  get synthetic(): boolean {
+    return this.inner.synthetic ?? false;
+  }
+
   private async record<T>(tool: QlooTool, params: unknown, call: () => Promise<Envelope<T>>): Promise<Envelope<T>> {
     const started = performance.now();
     const env = await call();
