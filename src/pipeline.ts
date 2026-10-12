@@ -21,6 +21,8 @@ export interface PlanOptions {
   adLoad?: number;
   /** Dayparts whose mean fit falls below this get licensing suggestions. Default 0.5. */
   gapThreshold?: number;
+  /** Solver wall-clock budget. Default 1500 ms. */
+  budgetMs?: number;
 }
 
 export interface LicenseSuggestion {
@@ -39,6 +41,8 @@ export interface Plan {
   unresolved: Array<{ name: string; status: string; candidates?: Candidate[] }>;
   matrix: OverlapMatrix;
   schedule: SolveResult;
+  /** Shows left off the grid: only possible when the library has more airtime than a day. */
+  notAired: string[];
   gaps: DaypartGap[];
   license: LicenseSuggestion[];
 }
@@ -71,16 +75,20 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
   // Small libraries must repeat more to fill the day; one airing of everything is the floor.
   const libraryUnits = solverShows.reduce((t, s) => t + s.units, 0);
   const neededAirings = libraryUnits ? Math.ceil(dayUnits / libraryUnits) + 1 : 0;
+  // Airing everything at least once is only possible when the whole library fits in a day.
+  const minAirings = libraryUnits <= dayUnits ? (opts.minAirings ?? 1) : 0;
   const schedule = solve({
     shows: solverShows,
     dayUnits,
     handoff: (a, b) => matrix.score(a, b),
     fit: fitFunction(demographics),
     maxAirings: opts.maxAirings ?? Math.max(4, neededAirings),
-    minAirings: opts.minAirings ?? 1,
+    minAirings,
     maxStack: opts.maxStack ?? 2,
     stackScore: 0.6,
-  });
+  }, { budgetMs: opts.budgetMs ?? 1500 });
+  const aired = new Set(schedule.slots.map((s) => s.showId));
+  const notAired = shows.filter((s) => !aired.has(s.id)).map((s) => s.id);
   const gaps = weakDayparts(schedule.slots, opts.gapThreshold ?? 0.5);
 
   const license: LicenseSuggestion[] = [];
@@ -100,5 +108,5 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     }
   }
 
-  return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, schedule, gaps, license };
+  return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, schedule, notAired, gaps, license };
 }

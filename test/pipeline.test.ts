@@ -35,3 +35,14 @@ describe("planDay", () => {
     expect(plan.license.every((l) => !library.has(l.title.id))).toBe(true);
   });
 });
+
+describe("planDay with a library longer than a day", () => {
+  it("fills the day and lists what didn't air instead of failing", async () => {
+    // Seven 4-hour blocks (8 units each) = 56 units of library for a 48-unit day.
+    const names = ["Columbo", "Matlock", "Knight Rider", "Baywatch", "Perry Mason", "The A-Team", "Magnum, P.I."];
+    const library = names.map((name) => ({ name, runtimeMinutes: 200 }));
+    const plan = await planDay(new FakeQlooClient(), library, { matrix: "recommend", maxAirings: 1, maxStack: 1 });
+    expect(plan.schedule.slots.reduce((n, s) => n + s.units, 0)).toBe(48);
+    expect(plan.notAired).toHaveLength(1);
+  });
+});

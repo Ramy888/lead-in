@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canFill, solve, scoreSequence, type SolverInput, type SolverShow } from "../src/solver/solve.js";
+import { annotate, canFill, solve, scoreSequence, type SolverInput, type SolverShow } from "../src/solver/solve.js";
 
 /** Deterministic PRNG so the random instances are the same on every run. */
 function rng(seed: number) {
@@ -122,5 +122,33 @@ describe("canFill", () => {
     const inp = input(shows, {}, { dayUnits: 10, minAirings: 1, maxAirings: 3 });
     expect(canFill(inp, 3, new Map([["D", 1], ["E", 1]]))).toBe(false);
     expect(canFill(inp, 5, new Map([["D", 1], ["E", 1]]))).toBe(true);
+  });
+});
+
+describe("solve budget", () => {
+  it("returns a valid day within the time budget on a 40-show library", () => {
+    const next = rng(7);
+    const shows = Array.from({ length: 40 }, (_, i) => ({ id: `S${i}`, units: 1 + Math.floor(next() * 3) }));
+    const m: Record<string, number> = {};
+    for (const a of shows) for (const b of shows) m[`${a.id}>${b.id}`] = next();
+    const inp = input(shows, m, { dayUnits: 48, maxAirings: 4, maxStack: 2, stackScore: 0.6 });
+    const started = performance.now();
+    const result = solve(inp, { budgetMs: 800 });
+    expect(performance.now() - started).toBeLessThan(800 + 400);
+    expect(scoreSequence(inp, result.slots.map((s) => s.showId))).toBeCloseTo(result.score);
+  });
+});
+
+describe("annotate", () => {
+  it("scores any day leniently and lists every broken rule instead of rejecting it", () => {
+    const shows = ["A", "B"].map((id) => ({ id, units: 1 }));
+    const inp = input(shows, { "A>B": 0.8, "B>A": 0.2 }, { dayUnits: 4, maxStack: 2, maxAirings: 3, minAirings: 1 });
+    const out = annotate(inp, ["A", "A", "A", "B"]);
+    expect(out.slots.map((s) => s.handoffScore)).toEqual([0, 0, 0.8, 0.2]);
+    expect(out.slots[3]!.weakHandoff).toBe(true);
+    expect(out.violations).toEqual(expect.arrayContaining([
+      expect.stringMatching(/A airs 3 times in a row/),
+    ]));
+    expect(annotate(inp, ["A", "B", "A", "B"]).violations).toEqual([]);
   });
 });

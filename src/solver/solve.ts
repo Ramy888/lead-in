@@ -197,11 +197,13 @@ function* neighbours(inp: SolverInput, seq: string[]): Generator<string[]> {
   }
 }
 
-function localSearch(inp: SolverInput, start: string[], maxPasses = 200): { seq: string[]; score: number } {
+function localSearch(inp: SolverInput, start: string[], deadline: number, maxPasses = 200): { seq: string[]; score: number } {
   let seq = start, score = scoreSequence(inp, start)!;
+  let checked = 0;
   for (let pass = 0; pass < maxPasses; pass++) {
     let improved = false;
     for (const cand of neighbours(inp, seq)) {
+      if (++checked % 256 === 0 && performance.now() > deadline) return { seq, score };
       const s = scoreSequence(inp, cand);
       if (s !== null && s > score + 1e-12) {
         [seq, score, improved] = [cand, s, true];
@@ -230,31 +232,49 @@ export interface SolveOptions {
   /** Iterated-local-search kicks after polishing. Seeded, so results are reproducible. */
   kicks?: number;
   seed?: number;
+  /** Wall-clock budget for polishing; the beam always completes. Results are deterministic unless it runs out. */
+  budgetMs?: number;
 }
 
-export function solve(inp: SolverInput, { beamWidth = 64, starts = 3, kicks = 30, seed = 1 }: SolveOptions = {}): SolveResult {
-  const { weakThreshold } = { ...DEFAULTS, ...inp };
+export function solve(inp: SolverInput, opts: SolveOptions = {}): SolveResult {
+  const { starts = 3, kicks = 30, seed = 1, budgetMs = Infinity } = opts;
+  // Wider beams pay off on small libraries; on large ones local search does more per millisecond.
+  const beamWidth = opts.beamWidth ?? (inp.shows.length <= 16 ? 64 : 16);
+  const deadline = performance.now() + budgetMs;
   const seeds = beam(inp, beamWidth).slice(0, starts);
   if (!seeds.length) throw new Error("Library cannot fill the day: add shows or raise maxAirings/maxStack.");
 
-  let best = seeds.map((seq) => localSearch(inp, seq)).sort((a, b) => b.score - a.score)[0]!;
+  let best = seeds.map((seq) => localSearch(inp, seq, deadline)).sort((a, b) => b.score - a.score)[0]!;
   let state = seed >>> 0;
   const rand = () => ((state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-  for (let k = 0; k < kicks; k++) {
+  for (let k = 0; k < kicks && performance.now() < deadline; k++) {
     const start = kick(best.seq, rand);
     if (scoreSequence(inp, start) === null) continue;
-    const cand = localSearch(inp, start);
+    const cand = localSearch(inp, start, deadline);
     if (cand.score > best.score + 1e-12) best = cand;
   }
+  return { slots: annotate(inp, best.seq).slots, score: best.score };
+}
+
+export interface Annotated {
+  slots: Slot[];
+  /** Human-readable rule breaks; empty when the day is valid. */
+  violations: string[];
+}
+
+/** Scores any day, valid or not: what the UI needs when someone drags a show into a bad spot. */
+export function annotate(inp: SolverInput, seq: string[]): Annotated {
+  const { weakThreshold } = { ...DEFAULTS, ...inp };
   const units = new Map(inp.shows.map((s) => [s.id, s.units]));
+  const violations: string[] = [];
   let unit = 0;
-  const slots = best.seq.map((showId, i) => {
-    const next = best.seq[(i + 1) % best.seq.length]!;
+  const slots = seq.map((showId, i) => {
+    const next = seq[(i + 1) % seq.length]!;
     const handoffScore = pairScore(inp, showId, next);
     const slot: Slot = {
       showId,
       startUnit: unit,
-      units: units.get(showId)!,
+      units: units.get(showId) ?? 0,
       fit: inp.fit(showId, unit),
       handoffScore,
       weakHandoff: showId !== next && handoffScore < weakThreshold,
@@ -262,5 +282,23 @@ export function solve(inp: SolverInput, { beamWidth = 64, starts = 3, kicks = 30
     unit += slot.units;
     return slot;
   });
-  return { slots, score: best.score };
+
+  if (unit !== inp.dayUnits) violations.push(`The day runs ${unit} of ${inp.dayUnits} half-hours`);
+  const counts = new Map<string, number>();
+  for (const id of seq) counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const [id, n] of counts) if (n > inp.maxAirings) violations.push(`${id} airs ${n} times (max ${inp.maxAirings})`);
+  const min = inp.minAirings ?? 0;
+  for (const s of inp.shows) if ((counts.get(s.id) ?? 0) < min) violations.push(`${s.id} doesn't air (min ${min})`);
+  const n = seq.length;
+  if (n > inp.maxStack) {
+    // Report each run once, from its first airing (walking backwards over the midnight wrap).
+    for (let i = 0; i < n; i++) {
+      if (seq[(i - 1 + n) % n] === seq[i] && counts.get(seq[i]!) !== n) continue;
+      let run = 1;
+      while (run < n && seq[(i + run) % n] === seq[i]) run++;
+      if (run > inp.maxStack) violations.push(`${seq[i]} airs ${run} times in a row (max ${inp.maxStack})`);
+      if (run === n) break;
+    }
+  }
+  return { slots, violations };
 }
