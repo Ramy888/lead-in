@@ -1,5 +1,7 @@
 # Lead-In
 
+**Live demo:** https://lead-in.ramy-comm.workers.dev (free, no login)
+
 An audience-flow programming agent for FAST channels (Pluto TV, Tubi, Samsung TV Plus, Roku Channel).
 Give it a show library and it builds a 24-hour schedule where each show hands its audience to the next.
 It also flags weak handoffs and suggests titles to license for dayparts the library serves poorly.
