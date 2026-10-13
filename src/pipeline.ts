@@ -117,27 +117,33 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
   const notAired = shows.filter((s) => !aired.has(s.id)).map((s) => s.id);
   const gaps = weakDayparts(schedule.slots, opts.gapThreshold ?? 0.5);
 
-  const license: LicenseSuggestion[] = [];
-  if (gaps.length && shows.length) {
-    const libraryIds = new Set(shows.map((s) => s.id));
-    const recs = await client.recommend(shows, "tv_show", 30);
-    // Only the closest few get a demographics lookup: each one is a Qloo call against a monthly quota.
-    const candidates = (recs.data ?? []).filter((r) => !libraryIds.has(r.entity.id)).slice(0, LICENSE_CANDIDATES);
-    const candidateDemo = await Promise.all(candidates.map((c) => client.audienceDemographics(c.entity)));
-    for (const gap of gaps) {
-      const profile = DAYPARTS.find((d) => d.name === gap.daypart)!.profile;
-      const scored = candidates.map((c, i) => ({
-        daypart: gap.daypart,
-        title: c.entity,
-        affinity: c.affinity,
-        match: handoffScore(c.affinity),
-        fit: demographicFit(candidateDemo[i]!.data, profile),
-      }));
-      // Raw affinities differ only in the second decimal, so rank on the mapped match.
-      scored.sort((a, b) => b.fit * b.match - a.fit * a.match);
-      license.push(...scored.slice(0, 3));
-    }
-  }
+  const license = gaps.length && shows.length ? await suggestTitles(client, shows, gaps.map((g) => g.daypart)) : [];
 
   return { synthetic: client.synthetic ?? false, shows, unresolved, matrix, demographics, solverInput, schedule, notAired, gaps, license };
+}
+
+/** Titles outside the library that share its audience, ranked per daypart by fit × match (top 3 each).
+ *  Used for the plan's licensing panel and by the agent. */
+export async function suggestTitles(client: QlooClient, shows: Entity[], dayparts: string[]): Promise<LicenseSuggestion[]> {
+  const libraryIds = new Set(shows.map((s) => s.id));
+  const recs = await client.recommend(shows, "tv_show", 30);
+  // Only the closest few get a demographics lookup: each one is a Qloo call against a monthly quota.
+  const candidates = (recs.data ?? []).filter((r) => !libraryIds.has(r.entity.id)).slice(0, LICENSE_CANDIDATES);
+  const candidateDemo = await Promise.all(candidates.map((c) => client.audienceDemographics(c.entity)));
+  const out: LicenseSuggestion[] = [];
+  for (const daypart of dayparts) {
+    const profile = DAYPARTS.find((d) => d.name === daypart)?.profile;
+    if (!profile) continue;
+    const scored = candidates.map((c, i) => ({
+      daypart,
+      title: c.entity,
+      affinity: c.affinity,
+      match: handoffScore(c.affinity),
+      fit: demographicFit(candidateDemo[i]!.data, profile),
+    }));
+    // Raw affinities differ only in the second decimal, so rank on the mapped match.
+    scored.sort((a, b) => b.fit * b.match - a.fit * a.match);
+    out.push(...scored.slice(0, 3));
+  }
+  return out;
 }

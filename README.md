@@ -24,6 +24,28 @@ The taste signals come from [Qloo](https://www.qloo.com/): show-to-show audience
    show airs at least once, and the day wraps at midnight. The solver uses beam search, then local search with seeded kicks.
 5. **Gaps → licensing:** weak dayparts get title suggestions from Qloo `recommend`, ranked by fit for that daypart.
 
+## The agent (NVIDIA Nemotron on Nebius Token Factory)
+
+The planner gives you a good day; the agent works on what you actually want. Type a goal ("fix the worst
+handoff; I can license one title") and Nemotron 3 Ultra runs a tool loop (`src/agent/agent.ts`):
+
+| Tool | What it does |
+|---|---|
+| `find_bridge(from, to)` | Qloo recommend with **both** shows of a weak handoff as signals: titles whose audience overlaps each side |
+| `find_titles_for_daypart(daypart)` | Qloo titles that share the library's audience, ranked by fit for that daypart |
+| `what_if(add, remove)` | Re-plans the full 24h day with titles added or dropped and reports the flow change |
+| `get_plan(id?)` | Reads the current plan or a what-if |
+| `finish(...)` | Recommendation, with Qloo-sourced facts and Lead-In's own reading kept in separate lists |
+
+Example (live, Classic TV Mix): the agent called `find_bridge(M*A*S*H → Baywatch)`, Qloo suggested The A-Team,
+`what_if(+The A-Team)` removed the only weak handoff and raised flow 0.824 → 0.847, and the agent adopted it.
+3 model calls, ~7k tokens, about $0.01. One click loads the new day into the grid.
+
+Guardrails: at most 8 steps, 3 what-ifs and 2 added titles each, a token budget, a 2-minute timeout that
+also stops Qloo calls; per-visitor rate limit; one run at a time; and a persisted daily-run cap and total
+Nemotron spend cap (`AGENT_MAX_RUNS_PER_DAY`, `AGENT_MAX_USD`). Ultra falls back to Nemotron 3 Super on errors.
+The model sees only show titles, Qloo IDs and scores; the brief is treated as a request, not instructions.
+
 Every Qloo call is recorded in a redacted trace (`src/qloo/trace.ts`) for the request-to-result walkthrough.
 
 ## The app
@@ -59,6 +81,7 @@ npm install
 npm test            # unit tests (solver checked against brute force)
 npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in ../.env, synthetic otherwise
 npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
+npm run agent:smoke # one live agent run (Nemotron + Qloo, a cent or two); PRESET=1 for Classic TV Mix
 npm run dev         # API + UI on :8080 (Node)
 npm run cf:dev      # the same app on the Cloudflare runtime (needs .dev.vars, below)
 ```
@@ -74,13 +97,15 @@ in the object's SQLite, so they survive eviction and redeploys. Rate limits key 
 npx wrangler login
 npx wrangler secret put QLOO_API_KEY            # prompts for the value
 npx wrangler secret put TMDB_READ_ACCESS_TOKEN
+npx wrangler secret put NEBIUS_API_KEY             # enables the agent
 npm run cf:deploy                                # typecheck + tests + wrangler deploy
 ```
 
-For `npm run cf:dev`, put the same two keys in `.dev.vars` (gitignored). A `Dockerfile` is kept for
+For `npm run cf:dev`, put the same keys in `.dev.vars` (gitignored). A `Dockerfile` is kept for
 container hosts (mount a volume at `/data` for the cache).
 
-Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN`;
+Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN` and
+`NEBIUS_API_KEY` (the agent);
 for Node also `QLOO_CACHE_FILE`, `PORT`, `TRUST_PROXY=1` behind a proxy.
 
 ## Data and privacy

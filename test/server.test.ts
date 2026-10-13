@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CachingClient } from "../src/qloo/cache.js";
 import { FakeQlooClient } from "../src/qloo/fake.js";
 import { createApp, type AppOptions } from "../src/server/app.js";
-import { RateLimiter } from "../src/server/limits.js";
+import { MemoryAgentBudget, RateLimiter } from "../src/server/limits.js";
+import type { ChatModel } from "../src/agent/llm.js";
 
 const servers: Array<{ close: () => void }> = [];
 afterEach(() => servers.splice(0).forEach((s) => s.close()));
@@ -108,6 +109,58 @@ describe("API plan store", () => {
     const res = await fetch(`${restarted}/api/plans/${made.id}/score`, { method: "POST", body: JSON.stringify({ sequence: seq }) });
     expect(res.status).toBe(200);
     expect((await res.json()).flow).toBe(made.schedule.flow);
+  });
+});
+
+describe("API agent", () => {
+  /** Finds one bridge, tries it, adopts it. */
+  const script = (): ChatModel => {
+    const steps = [
+      { name: "find_bridge", args: { from: "Columbo", to: "Baywatch" } },
+      { name: "what_if", args: { add: [{ title: "Hart to Hart" }] } },
+      { name: "finish", args: { recommendation: "Add Hart to Hart.", qloo_evidence: ["a"], our_read: ["b"], adopt_what_if: "w1" } },
+    ];
+    let n = 0;
+    return {
+      chat: async () => {
+        const s = steps[n++]!;
+        return { content: "", toolCalls: [{ id: `c${n}`, type: "function", function: { name: s.name, arguments: JSON.stringify(s.args) } }], model: "m", promptTokens: 10, completionTokens: 5, usd: 0.01 };
+      },
+    };
+  };
+  const agentRun = (base: string, body: unknown) => fetch(`${base}/api/agent`, { method: "POST", body: JSON.stringify(body) });
+  const lines = async (res: Response) => (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+
+  it("streams Qloo calls and agent steps, then a result whose adopted day can be re-scored", async () => {
+    const budget = new MemoryAgentBudget(5, 1);
+    const base = await start({ agent: { llm: script(), budget } });
+    expect(await (await fetch(`${base}/api/health`)).json()).toMatchObject({ agent: true });
+    const out = await lines(await agentRun(base, { library: LIB.slice(0, 4), brief: "Fix Columbo into Baywatch" }));
+    const types = new Set(out.map((l) => l.type));
+    expect(types).toEqual(new Set(["trace", "agent_call", "agent_result_step", "agent_done"]));
+    const { result } = out.at(-1);
+    expect(result).toMatchObject({ recommendation: "Add Hart to Hart.", qlooEvidence: ["a"], ourRead: ["b"], usage: { llmCalls: 3, usd: 0.03 } });
+    expect(result.adopted.add).toEqual(["Hart to Hart"]);
+    const seq = result.adopted.plan.schedule.slots.map((s: { showId: string }) => s.showId);
+    const res = await fetch(`${base}/api/plans/${result.adopted.plan.id}/score`, { method: "POST", body: JSON.stringify({ sequence: seq }) });
+    expect(res.status).toBe(200);
+  });
+
+  it("is off without a model, and refuses runs once the budget or the visitor's limit is spent", async () => {
+    const off = await start();
+    expect(await (await fetch(`${off}/api/health`)).json()).toMatchObject({ agent: false });
+    expect((await agentRun(off, { library: LIB })).status).toBe(503);
+
+    const spent = new MemoryAgentBudget(5, 0.02);
+    const base = await start({ agent: { llm: script(), budget: spent } });
+    await lines(await agentRun(base, { library: LIB.slice(0, 4), brief: "" })); // spends 0.03
+    const refused = await agentRun(base, { library: LIB.slice(0, 4), brief: "" });
+    expect(refused.status).toBe(503);
+    expect((await refused.json()).error).toMatch(/budget/);
+
+    const limited = await start({ agent: { llm: script(), limiter: new RateLimiter(1, 0) } });
+    await lines(await agentRun(limited, { library: LIB.slice(0, 4), brief: "" }));
+    expect((await agentRun(limited, { library: LIB.slice(0, 4), brief: "" })).status).toBe(429);
   });
 });
 

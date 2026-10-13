@@ -17,6 +17,8 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] }],
   // Set with `wrangler secret put` (deployed) or .dev.vars (local); never in this file.
-  "secrets": { "required": ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN"] },
+  "secrets": { "required": ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN", "NEBIUS_API_KEY"] },
+  // Agent spend guards (Nemotron on Nebius Token Factory). Plain vars: not secret.
+  "vars": { "AGENT_MAX_USD": "12", "AGENT_MAX_RUNS_PER_DAY": "40" },
   "observability": { "enabled": true }
 }

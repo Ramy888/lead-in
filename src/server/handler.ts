@@ -3,6 +3,8 @@
 // Public and unauthenticated by design, so judges can use it directly: every route is size-capped,
 // rate-limited, and planning runs are capped in number and time. Keys live only in server-side env.
 
+import { runAgent, type AgentResult } from "../agent/agent.js";
+import type { ChatModel } from "../agent/llm.js";
 import { planDay, type LibraryItem } from "../pipeline.js";
 import { snapshotOf, solverInputOf, type PlanSnapshot } from "../plan-snapshot.js";
 import { PRESETS } from "../presets.js";
@@ -10,7 +12,7 @@ import { TracingClient } from "../qloo/trace.js";
 import type { QlooClient } from "../qloo/types.js";
 import { annotate } from "../solver/solve.js";
 import type { TmdbClient } from "../tmdb/client.js";
-import { RateLimiter, TtlStore } from "./limits.js";
+import { MemoryAgentBudget, RateLimiter, TtlStore, type AgentBudget } from "./limits.js";
 import { planView, scoreView } from "./view.js";
 
 export interface HandlerOptions {
@@ -24,6 +26,8 @@ export interface HandlerOptions {
   scoreLimiter?: RateLimiter;
   /** Where plans wait to be re-scored. Default: in memory for 6 hours. */
   planStore?: PlanStore;
+  /** The Nemotron agent; without it /api/agent answers 503 and the UI hides the agent. */
+  agent?: { llm: ChatModel; budget?: AgentBudget; limiter?: RateLimiter; timeoutMs?: number };
 }
 
 export interface PlanStore {
@@ -124,6 +128,10 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
   const plans: PlanStore = opts.planStore ?? new TtlStore<PlanSnapshot>(200, 6 * 60 * 60 * 1000);
   const runtimes = new Map<string, number>();
   let running = 0;
+  let agentsRunning = 0;
+  const agentBudget = opts.agent?.budget ?? new MemoryAgentBudget();
+  // Each run spends Qloo quota and Nemotron credit: 2 at once per visitor, then one every ~3 minutes.
+  const agentLimiter = opts.agent?.limiter ?? new RateLimiter(2, 0.34);
 
   /** Fills missing runtimes from TMDB (cached); 45 min when TMDB has nothing. */
   async function withRuntimes(library: PlanRequest["library"]): Promise<LibraryItem[]> {
@@ -197,6 +205,92 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
     });
   }
 
+  async function runAgentRequest(req: Request, clientKey: string): Promise<Response> {
+    const agent = opts.agent;
+    if (!agent) throw new HttpError(503, "The agent isn't configured on this server");
+    const blocked = agentBudget.blocked();
+    if (blocked) throw new HttpError(503, blocked);
+    if (!agentLimiter.take(clientKey)) throw new HttpError(429, "Too many agent runs; try again in a few minutes");
+    const body = (await readJson(req, maxBody)) as { brief?: unknown } | null;
+    const request = parsePlanRequest(body, maxShows);
+    const brief = typeof body?.brief === "string" ? body.brief.slice(0, 500) : "";
+    if (agentsRunning >= 1) throw new HttpError(503, "The agent is busy with another channel; try again shortly");
+
+    agentsRunning++;
+    agentBudget.startRun();
+    const encoder = new TextEncoder();
+    const abort = new AbortController();
+    let closed = false;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const client = new TracingClient(opts.qloo, (entry) => write({ type: "trace", entry }));
+    const body$ = new ReadableStream<Uint8Array>({
+      start: (c) => void (controller = c),
+      // Unlike a plan, a half-finished agent run has nothing worth finishing: stop spending.
+      cancel: () => {
+        closed = true;
+        abort.abort();
+        client.cancel();
+      },
+    });
+    function write(line: unknown) {
+      if (!closed) controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
+    }
+    // Every model call is charged to the global budget as it happens, even if the run later fails.
+    const llm: ChatModel = {
+      chat: async (messages, tools, signal) => {
+        const res = await agent.llm.chat(messages, tools, signal);
+        agentBudget.spend(res.usd);
+        return res;
+      },
+    };
+
+    void (async () => {
+      const timer = setTimeout(() => {
+        abort.abort();
+        client.cancel();
+      }, agent.timeoutMs ?? 120_000);
+      try {
+        const runtimeOf = async (item: { name: string; year?: number }) => (await withRuntimes([item]))[0]!.runtimeMinutes;
+        const result = await runAgent({ llm, qloo: client, runtimeOf }, { library: (await withRuntimes(request.library)), brief }, write, abort.signal);
+        write({ type: "agent_done", result: agentView(result, client) });
+      } catch (err) {
+        const message = abort.signal.aborted ? "The agent took too long and was stopped" : err instanceof Error ? err.message : "Agent failed";
+        write({ type: "error", message });
+      } finally {
+        clearTimeout(timer);
+        agentsRunning--;
+        if (!closed) {
+          closed = true;
+          controller.close();
+        }
+      }
+    })();
+
+    return new Response(body$, {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", ...SECURITY_HEADERS },
+    });
+  }
+
+  /** The agent's answer for the browser; an adopted what-if becomes a plan the grid can load and re-score. */
+  function agentView(result: AgentResult, client: TracingClient) {
+    let adopted = null;
+    if (result.adopted) {
+      const id = crypto.randomUUID();
+      plans.set(id, snapshotOf(result.adopted.plan));
+      adopted = { id: result.adopted.id, add: result.adopted.add, remove: result.adopted.remove, plan: planView(id, result.adopted.plan, client.trace) };
+    }
+    return {
+      recommendation: result.recommendation,
+      qlooEvidence: result.qlooEvidence,
+      ourRead: result.ourRead,
+      baselineFlow: planView("", result.baseline, []).schedule.flow,
+      adopted,
+      usage: { ...result.usage, usd: Math.round(result.usage.usd * 10000) / 10000 },
+      ...(result.stoppedBecause ? { stoppedBecause: result.stoppedBecause } : {}),
+    };
+  }
+
   async function scorePlan(req: Request, clientKey: string, id: string): Promise<Response> {
     if (!scoreLimiter.take(clientKey)) throw new HttpError(429, "Too many requests");
     const plan = plans.get(id);
@@ -215,9 +309,12 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
   return async (req, clientKey) => {
     const path = new URL(req.url).pathname;
     try {
-      if (req.method === "GET" && path === "/api/health") return jsonResponse(200, { ok: true, synthetic: opts.qloo.synthetic ?? false });
+      if (req.method === "GET" && path === "/api/health") {
+        return jsonResponse(200, { ok: true, synthetic: opts.qloo.synthetic ?? false, agent: !!opts.agent });
+      }
       if (req.method === "GET" && path === "/api/presets") return jsonResponse(200, PRESETS);
       if (req.method === "POST" && path === "/api/plans") return await createPlan(req, clientKey);
+      if (req.method === "POST" && path === "/api/agent") return await runAgentRequest(req, clientKey);
       const score = path.match(/^\/api\/plans\/([0-9a-f-]{36})\/score$/);
       if (req.method === "POST" && score) return await scorePlan(req, clientKey, score[1]!);
       throw new HttpError(404, "Not found");

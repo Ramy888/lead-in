@@ -156,6 +156,7 @@ button, input { font: inherit; color: inherit; }
 .tag.qloo { color: var(--qloo); border-color: color-mix(in srgb, var(--qloo) 50%, transparent); }
 .tag.ours { color: var(--ours); border-color: color-mix(in srgb, var(--ours) 50%, transparent); }
 .tag.tmdb { color: var(--tmdb); border-color: color-mix(in srgb, var(--tmdb) 50%, transparent); }
+.tag.agent { color: var(--strong); border-color: color-mix(in srgb, var(--strong) 50%, transparent); }
 .tag.synthetic { color: var(--mid); border-color: color-mix(in srgb, var(--mid) 50%, transparent); }
 .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
 .card h4 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
@@ -186,3 +187,25 @@ button, input { font: inherit; color: inherit; }
 /* The day strip keeps a readable width and scrolls inside itself on narrow screens. */
 .strip { overflow-x: auto; }
 .strip .bar, .strip .ticks { min-width: 620px; }
+
+/* Agent */
+.agent-box { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
+.agent-box h2 { margin-top: 0; }
+.agent-box textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 14px; }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.examples button { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.examples button:hover { color: var(--text); border-color: var(--accent); }
+.timeline { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
+.timeline li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; font-size: 13px; line-height: 1.4; }
+.timeline .ic { font-family: var(--mono); color: var(--muted); text-align: center; }
+.timeline .tool { font-family: var(--mono); color: var(--accent); }
+.timeline .ok { color: var(--text); }
+.timeline .bad { color: var(--weak); }
+.timeline .note { color: var(--muted); font-style: italic; }
+.timeline li > span:last-child { overflow-wrap: anywhere; }
+.agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel-2); }
+.agent-card .rec { font-size: 15px; margin: 0 0 12px; }
+.agent-card ul { margin: 6px 0 12px; padding-left: 18px; }
+.agent-card li { margin: 3px 0; font-size: 13px; }
+.agent-card .change { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--strong) 40%, transparent); margin-bottom: 10px; font-size: 14px; }
+.agent-card .usage { font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 0; }

@@ -44,3 +44,37 @@ export class TtlStore<T> {
     return hit.value;
   }
 }
+
+/** Global spend guard for the agent: a daily run cap and a total Nemotron budget (USD). */
+export interface AgentBudget {
+  /** Why a new run can't start, or null if it can. */
+  blocked(now?: number): string | null;
+  startRun(now?: number): void;
+  spend(usd: number): void;
+}
+
+export const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
+
+/** In-memory budget (Node). The Cloudflare deploy persists the same numbers in SQLite. */
+export class MemoryAgentBudget implements AgentBudget {
+  private day = "";
+  private runs = 0;
+  private usd = 0;
+
+  constructor(private readonly maxRunsPerDay = 40, private readonly maxUsd = 10) {}
+
+  blocked(now = Date.now()): string | null {
+    if (this.usd >= this.maxUsd) return "The agent's model budget for this demo is used up; planning still works.";
+    if (dayOf(now) === this.day && this.runs >= this.maxRunsPerDay) return "The agent has hit today's run limit; try again tomorrow. Planning still works.";
+    return null;
+  }
+
+  startRun(now = Date.now()): void {
+    if (dayOf(now) !== this.day) [this.day, this.runs] = [dayOf(now), 0];
+    this.runs++;
+  }
+
+  spend(usd: number): void {
+    this.usd += usd;
+  }
+}

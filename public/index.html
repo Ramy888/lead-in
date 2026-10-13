@@ -39,6 +39,16 @@
       <button id="plan-btn" class="primary">Plan the 24h channel</button>
       <div id="progress" class="progress" aria-live="polite"></div>
       <div id="needs-input" class="needs-input" aria-live="polite"></div>
+
+      <div id="agent-box" class="agent-box" hidden>
+        <h2>3 · Ask the agent</h2>
+        <p class="hint">NVIDIA Nemotron reads your goal, asks Qloo for titles that bridge weak spots, tests what-ifs on the schedule and recommends a change, or none.</p>
+        <label class="sr-only" for="brief">Your goal for the channel</label>
+        <textarea id="brief" maxlength="500" rows="3" placeholder="e.g. Late night is weak. I can license one or two titles."></textarea>
+        <div id="examples" class="examples"></div>
+        <button id="agent-btn" class="primary">Run the agent</button>
+        <div id="agent-progress" class="progress" aria-live="polite"></div>
+      </div>
     </section>
 
     <section class="schedule panel" aria-labelledby="schedule-title">
@@ -57,11 +67,13 @@
       <h2 id="insights-title" class="sr-only">Insights</h2>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="gaps">Gaps &amp; licensing</button>
+        <button role="tab" aria-selected="false" data-tab="agent" id="agent-tab" hidden>Agent</button>
         <button role="tab" aria-selected="false" data-tab="matrix">Overlap matrix</button>
         <button role="tab" aria-selected="false" data-tab="trace">Qloo calls</button>
         <button role="tab" aria-selected="false" data-tab="how">How it works</button>
       </div>
       <div id="tab-gaps" class="tab" role="tabpanel"></div>
+      <div id="tab-agent" class="tab" role="tabpanel" hidden></div>
       <div id="tab-matrix" class="tab" role="tabpanel" hidden></div>
       <div id="tab-trace" class="tab" role="tabpanel" hidden></div>
       <div id="tab-how" class="tab" role="tabpanel" hidden>
@@ -71,6 +83,8 @@
           <dd>How strongly fans of one show also like another (Qloo affinity, shown raw in the matrix tooltips), each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
           <dt><span class="tag ours">Our read</span></dt>
           <dd>The handoff score: Qloo's affinities sit in a narrow band (about 0.76 for unrelated shows to 0.97 for close neighbours), so Lead-In maps 0.86 and below to 0 and 0.975 to 1; a raw affinity under about 0.90 reads as a weak handoff. Also who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
+          <dt><span class="tag agent">Agent</span></dt>
+          <dd>NVIDIA Nemotron (on Nebius Token Factory) decides what to investigate and what to test, using only the tools above: Qloo lookups and what-if re-plans. It must quote only numbers the tools returned, and it files them under "Qloo says" or "Our read".</dd>
           <dt><span class="tag tmdb">TMDB</span></dt>
           <dd>Episode runtimes, which set slot lengths (runtime plus about 12% ad load, rounded up to half hours).</dd>
         </dl>

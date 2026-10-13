@@ -18,7 +18,7 @@ const SECRET_KEY_NAME = /key|token|secret|authorization|password/i;
 const TOKEN_LIKE = /[A-Za-z0-9_\-]{32,}/g;
 // Qloo entity IDs are UUIDs: long, but public and needed in the walkthrough.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SECRET_ENV = ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN", "TMDB_API_KEY", "ANTHROPIC_API_KEY"];
+const SECRET_ENV = ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN", "TMDB_API_KEY", "NEBIUS_API_KEY"];
 const registered = new Set<string>();
 
 /** Secrets that live outside process.env (a Cloudflare Worker's env) are registered here to be masked. */

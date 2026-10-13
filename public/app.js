@@ -23,6 +23,7 @@ const state = {
   seq: [],
   view: null, // { slots, flow, violations } for the current order
   planning: false,
+  agentRunning: false,
 };
 
 const dpClass = (name) => "dp-" + name.toLowerCase().replace(/\s+/g, "-");
@@ -282,14 +283,13 @@ $("#reset-btn").addEventListener("click", () => rescore(state.plan.schedule.slot
 
 // ---------- Insights ----------
 
-for (const tab of document.querySelectorAll('[role="tab"]')) {
-  tab.addEventListener("click", () => {
-    for (const t of document.querySelectorAll('[role="tab"]')) {
-      t.setAttribute("aria-selected", String(t === tab));
-      $(`#tab-${t.dataset.tab}`).hidden = t !== tab;
-    }
-  });
+function showTab(name) {
+  for (const t of document.querySelectorAll('[role="tab"]')) {
+    t.setAttribute("aria-selected", String(t.dataset.tab === name));
+    $(`#tab-${t.dataset.tab}`).hidden = t.dataset.tab !== name;
+  }
 }
+for (const tab of document.querySelectorAll('[role="tab"]')) tab.addEventListener("click", () => showTab(tab.dataset.tab));
 
 function sourceTag() {
   return state.plan.synthetic ? h("span", { class: "tag synthetic" }, "Synthetic") : h("span", { class: "tag qloo" }, "Qloo says");
@@ -360,6 +360,139 @@ function renderInsights() {
   );
 }
 
+// ---------- Agent ----------
+
+const EXAMPLES = [
+  "Late night is weak. I can license one or two titles.",
+  "Fix the weakest handoff in the day.",
+  "Would dropping a show make the channel flow better?",
+];
+
+const TOOL_LABEL = {
+  get_plan: "read plan",
+  find_bridge: "Qloo: bridge titles",
+  find_titles_for_daypart: "Qloo: titles for daypart",
+  what_if: "what-if re-plan",
+  finish: "recommend",
+};
+
+/** Reads an NDJSON response line by line. */
+async function readLines(res, onLine) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.trim()) onLine(JSON.parse(line));
+    }
+  }
+}
+
+async function runAgentUi() {
+  if (state.agentRunning || !state.library.length) return;
+  state.agentRunning = true;
+  $("#agent-btn").disabled = true;
+  const timeline = h("ol", { class: "timeline" });
+  const status = h("p", { class: "empty" }, "Planning the day, then handing it to the agent…");
+  $("#tab-agent").replaceChildren(status, timeline);
+  showTab("agent");
+  let qlooCalls = 0, cached = 0;
+  const counter = h("span", { class: "num" }, "0");
+  $("#agent-progress").replaceChildren("Agent working… Qloo calls: ", counter);
+  const add = (icon, ...content) => timeline.append(h("li", {}, h("span", { class: "ic" }, icon), h("span", {}, ...content)));
+  try {
+    const res = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ library: state.library, brief: $("#brief").value }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
+    await readLines(res, (msg) => {
+      if (msg.type === "trace") {
+        qlooCalls++;
+        if (msg.entry.cached) cached++;
+        counter.textContent = String(qlooCalls);
+      } else if (msg.type === "agent_note") {
+        add("…", h("span", { class: "note" }, msg.text));
+      } else if (msg.type === "agent_call") {
+        status.textContent = "The agent is working:";
+        add("→", h("span", { class: "tool" }, TOOL_LABEL[msg.tool] ?? msg.tool), " ", argText(msg.tool, msg.args));
+      } else if (msg.type === "agent_result_step") {
+        add(msg.ok ? "✓" : "✗", h("span", { class: msg.ok ? "ok" : "bad" }, msg.summary));
+      } else if (msg.type === "agent_done") {
+        status.textContent = "What the agent did:";
+        $("#tab-agent").append(agentCard(msg.result, qlooCalls, cached));
+      } else if (msg.type === "error") {
+        throw new Error(msg.message);
+      }
+    });
+    $("#agent-progress").replaceChildren(`Done. ${qlooCalls} Qloo calls (${cached} cached).`);
+  } catch (err) {
+    $("#agent-progress").replaceChildren(h("span", { style: { color: "var(--weak)" } }, `Agent stopped: ${err.message}`));
+    status.textContent = `The agent stopped: ${err.message}`;
+  } finally {
+    state.agentRunning = false;
+    $("#agent-btn").disabled = false;
+  }
+}
+
+function argText(tool, args) {
+  if (tool === "find_bridge") return `${args.from} → ${args.to}`;
+  if (tool === "find_titles_for_daypart") return String(args.daypart ?? "");
+  if (tool === "what_if") {
+    const parts = [...(args.add ?? []).map((a) => `+ ${a.title}`), ...(args.remove ?? []).map((t) => `− ${t}`)];
+    return parts.join(", ");
+  }
+  if (tool === "get_plan") return args.id ? String(args.id) : "current";
+  return "";
+}
+
+function agentCard(r, qlooCalls, cached) {
+  const list = (items, tag) =>
+    items.length ? h("ul", {}, ...items.map((x) => h("li", {}, x))) : h("p", { class: "empty" }, tag === "qloo" ? "No Qloo figures quoted." : "—");
+  const parts = [h("p", { class: "rec" }, r.recommendation)];
+  if (r.adopted) {
+    const flow = r.adopted.plan.schedule.flow;
+    const change = [...r.adopted.add.map((t) => `+ ${t}`), ...r.adopted.remove.map((t) => `− ${t}`)].join(", ");
+    parts.push(
+      h("div", { class: "change" },
+        h("span", {}, `${change} · audience flow ${fmt(r.baselineFlow)} → ${fmt(flow)}`),
+        h("button", { class: "ghost", onclick: () => adoptAgentPlan(r.adopted) }, "Load this day"),
+      ),
+    );
+  } else {
+    parts.push(h("p", { class: "empty" }, "No change adopted: the agent recommends keeping the current plan."));
+  }
+  parts.push(
+    h("p", {}, h("span", { class: "tag qloo" }, "Qloo says")), list(r.qlooEvidence, "qloo"),
+    h("p", {}, h("span", { class: "tag ours" }, "Our read")), list(r.ourRead, "ours"),
+  );
+  const u = r.usage;
+  const model = (u.models ?? []).map((m) => m.replace(/^nvidia\//, "")).join(", ");
+  parts.push(h("p", { class: "usage" }, `${u.llmCalls} Nemotron calls (${model}) · ${(u.promptTokens + u.completionTokens).toLocaleString()} tokens · $${u.usd.toFixed(3)} · ${qlooCalls} Qloo calls (${cached} cached)${r.stoppedBecause ? " · stopped: " + r.stoppedBecause : ""}`));
+  return h("div", { class: "agent-card" }, ...parts);
+}
+
+/** Puts the agent's adopted day on the grid, and the change into the library so re-plans keep it. */
+function adoptAgentPlan(adopted) {
+  const removed = new Set(adopted.remove.map((t) => t.toLowerCase()));
+  const resolved = new Map((state.plan?.shows ?? []).map((s) => [s.name.toLowerCase(), s]));
+  state.library = state.library.filter((item) => !removed.has(item.name.toLowerCase()) && !removed.has((resolved.get(item.name.toLowerCase())?.name ?? "").toLowerCase()));
+  for (const title of adopted.add) {
+    const show = adopted.plan.shows.find((s) => s.name === title);
+    state.library.push(show ? { name: show.name, qlooId: show.id, runtimeMinutes: show.runtimeMinutes, ...(show.year ? { year: show.year } : {}) } : { name: title });
+  }
+  state.presetId = null;
+  renderPresets();
+  loadPlan(adopted.plan);
+  showTab("gaps");
+}
+
+$("#agent-btn").addEventListener("click", runAgentUi);
+$("#examples").replaceChildren(...EXAMPLES.map((text) => h("button", { type: "button", onclick: () => ($("#brief").value = text) }, text)));
+
 // ---------- Boot ----------
 
 (async () => {
@@ -369,6 +502,9 @@ function renderInsights() {
     if (first) { state.presetId = first.id; state.library = first.library.map((s) => ({ ...s })); }
     renderPresets();
     renderLibrary();
+    const health = await (await fetch("/api/health")).json();
+    $("#agent-box").hidden = !health.agent;
+    $("#agent-tab").hidden = !health.agent;
   } catch {
     $("#progress").textContent = "Couldn't reach the Lead-In server.";
   }
