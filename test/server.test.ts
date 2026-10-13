@@ -4,7 +4,7 @@ import { CachingClient } from "../src/qloo/cache.js";
 import { FakeQlooClient } from "../src/qloo/fake.js";
 import { createApp, type AppOptions } from "../src/server/app.js";
 import { MemoryAgentBudget, RateLimiter } from "../src/server/limits.js";
-import type { ChatModel } from "../src/agent/llm.js";
+import type { AgentModel, AgentReply } from "../src/agent/claude.js";
 
 const servers: Array<{ close: () => void }> = [];
 afterEach(() => servers.splice(0).forEach((s) => s.close()));
@@ -114,7 +114,7 @@ describe("API plan store", () => {
 
 describe("API agent", () => {
   /** Finds one bridge, tries it, adopts it. */
-  const script = (): ChatModel => {
+  const script = (): AgentModel => {
     const steps = [
       { name: "find_bridge", args: { from: "Columbo", to: "Baywatch" } },
       { name: "what_if", args: { add: [{ title: "Hart to Hart" }] } },
@@ -122,9 +122,10 @@ describe("API agent", () => {
     ];
     let n = 0;
     return {
-      chat: async () => {
+      turn: async () => {
         const s = steps[n++]!;
-        return { content: "", toolCalls: [{ id: `c${n}`, type: "function", function: { name: s.name, arguments: JSON.stringify(s.args) } }], model: "m", promptTokens: 10, completionTokens: 5, usd: 0.01 };
+        const message = { model: "m", content: [{ type: "tool_use", id: `toolu_${n}`, name: s.name, input: s.args }], stop_reason: "tool_use", usage: { input_tokens: 10, output_tokens: 5 } };
+        return { message: message as unknown as AgentReply, usd: 0.01 };
       },
     };
   };
@@ -133,7 +134,7 @@ describe("API agent", () => {
 
   it("streams Qloo calls and agent steps, then a result whose adopted day can be re-scored", async () => {
     const budget = new MemoryAgentBudget(5, 1);
-    const base = await start({ agent: { llm: script(), budget } });
+    const base = await start({ agent: { model: script(), budget } });
     expect(await (await fetch(`${base}/api/health`)).json()).toMatchObject({ agent: true });
     const out = await lines(await agentRun(base, { library: LIB.slice(0, 4), brief: "Fix Columbo into Baywatch" }));
     const types = new Set(out.map((l) => l.type));
@@ -152,15 +153,44 @@ describe("API agent", () => {
     expect((await agentRun(off, { library: LIB })).status).toBe(503);
 
     const spent = new MemoryAgentBudget(5, 0.02);
-    const base = await start({ agent: { llm: script(), budget: spent } });
+    const base = await start({ agent: { model: script(), budget: spent } });
     await lines(await agentRun(base, { library: LIB.slice(0, 4), brief: "" })); // spends 0.03
     const refused = await agentRun(base, { library: LIB.slice(0, 4), brief: "" });
     expect(refused.status).toBe(503);
     expect((await refused.json()).error).toMatch(/budget/);
 
-    const limited = await start({ agent: { llm: script(), limiter: new RateLimiter(1, 0) } });
+    const limited = await start({ agent: { model: script(), limiter: new RateLimiter(1, 0) } });
     await lines(await agentRun(limited, { library: LIB.slice(0, 4), brief: "" }));
     expect((await agentRun(limited, { library: LIB.slice(0, 4), brief: "" })).status).toBe(429);
+  });
+});
+
+describe("API compare", () => {
+  it("scores the plan against Claude alone once per plan, and works without a model too", async () => {
+    let calls = 0;
+    const model: AgentModel = {
+      turn: async () => {
+        calls++;
+        const text = JSON.stringify({ schedule: ["Columbo", "Murder, She Wrote", "Knight Rider", "Baywatch"] });
+        return { message: { model: "m", content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } } as unknown as AgentReply, usd: 0.01 };
+      },
+    };
+    const base = await start({ agent: { model } });
+    const { lines } = await plan(base, { library: LIB.slice(0, 4) });
+    const id = lines.at(-1).plan.id;
+    const first = await (await fetch(`${base}/api/plans/${id}/compare`, { method: "POST" })).json();
+    const again = await (await fetch(`${base}/api/plans/${id}/compare`, { method: "POST" })).json();
+    expect(first.aiOnly.order.length).toBeGreaterThan(0);
+    expect(first.leadIn.flow).toBeGreaterThanOrEqual(first.shuffled.flow);
+    expect(again).toEqual(first);
+    expect(calls).toBe(1);
+
+    const off = await start();
+    const p2 = (await plan(off, { library: LIB.slice(0, 4) })).lines.at(-1).plan.id;
+    const noModel = await (await fetch(`${off}/api/plans/${p2}/compare`, { method: "POST" })).json();
+    expect(noModel.aiOnly).toBeUndefined();
+    expect(noModel.leadIn.flow).toBeGreaterThan(0);
+    expect((await fetch(`${off}/api/plans/00000000-0000-0000-0000-000000000000/compare`, { method: "POST" })).status).toBe(404);
   });
 });
 

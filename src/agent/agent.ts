@@ -1,4 +1,4 @@
-// Lead-In's programming agent. Nemotron reads the programmer's brief and the planned day, then decides
+// Lead-In's programming agent. Claude reads the programmer's brief and the planned day, then decides
 // what to investigate and what to try: Qloo "bridge" titles for weak handoffs, titles for weak dayparts,
 // and what-if re-plans with titles added or dropped. It finishes with a recommendation that separates
 // what Qloo says from Lead-In's reading of it. Every tool is read-only except for spending Qloo quota,
@@ -9,7 +9,7 @@ import { planDay, suggestTitles, type LibraryItem, type Plan } from "../pipeline
 import type { QlooClient } from "../qloo/types.js";
 import { flowScore, slotViews } from "../server/view.js";
 import { DAYPARTS, weakDayparts } from "../solver/dayparts.js";
-import type { ChatMessage, ChatModel, ToolCall, ToolSpec } from "./llm.js";
+import type { AgentMessage, AgentModel, AgentTool } from "./claude.js";
 
 export interface AgentLimits {
   maxSteps: number;
@@ -22,7 +22,7 @@ export interface AgentLimits {
 export const DEFAULT_LIMITS: AgentLimits = { maxSteps: 8, maxWhatIfs: 3, maxAddsPerWhatIf: 2, maxTokens: 150_000 };
 
 export interface AgentDeps {
-  llm: ChatModel;
+  model: AgentModel;
   qloo: QlooClient;
   /** Runtime in minutes for a title the agent adds (TMDB when available). */
   runtimeOf?: (item: { name: string; year?: number }) => Promise<number>;
@@ -64,70 +64,55 @@ interface WhatIf {
 
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
-const TOOLS: ToolSpec[] = [
+const TOOLS: AgentTool[] = [
   {
-    type: "function",
-    function: {
-      name: "get_plan",
-      description: "Summary of a planned day: flow score, weak handoffs, daypart fit, unresolved titles. Omit id for the current library's plan.",
-      parameters: { type: "object", properties: { id: { type: "string", description: "A what-if id such as w1" } } },
+    name: "get_plan",
+    description: "Summary of a planned day: flow score, weak handoffs, daypart fit, unresolved titles. Omit id for the current library's plan.",
+    input_schema: { type: "object", properties: { id: { type: "string", description: "A what-if id such as w1" } } },
+  },
+  {
+    name: "find_bridge",
+    description:
+      "Ask Qloo for TV shows whose audience overlaps BOTH shows of a weak handoff, so one could air between them. Both must be titles in the library.",
+    input_schema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"] },
+  },
+  {
+    name: "find_titles_for_daypart",
+    description: "Ask Qloo for titles outside the library that share its audience, ranked by fit for one daypart.",
+    input_schema: {
+      type: "object",
+      properties: { daypart: { type: "string", enum: DAYPARTS.map((d) => d.name) } },
+      required: ["daypart"],
     },
   },
   {
-    type: "function",
-    function: {
-      name: "find_bridge",
-      description:
-        "Ask Qloo for TV shows whose audience overlaps BOTH shows of a weak handoff, so one could air between them. Both must be titles in the library.",
-      parameters: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } }, required: ["from", "to"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_titles_for_daypart",
-      description: "Ask Qloo for titles outside the library that share its audience, ranked by fit for one daypart.",
-      parameters: {
-        type: "object",
-        properties: { daypart: { type: "string", enum: DAYPARTS.map((d) => d.name) } },
-        required: ["daypart"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "what_if",
-      description:
-        "Re-plan the 24h day with titles added and/or removed, and compare it with the current plan. Pass qloo_id from a find_* result when you have one.",
-      parameters: {
-        type: "object",
-        properties: {
-          add: {
-            type: "array",
-            items: { type: "object", properties: { title: { type: "string" }, qloo_id: { type: "string" } }, required: ["title"] },
-          },
-          remove: { type: "array", items: { type: "string" } },
+    name: "what_if",
+    description:
+      "Re-plan the 24h day with titles added and/or removed, and compare it with the current plan. Pass qloo_id from a find_* result when you have one.",
+    input_schema: {
+      type: "object",
+      properties: {
+        add: {
+          type: "array",
+          items: { type: "object", properties: { title: { type: "string" }, qloo_id: { type: "string" } }, required: ["title"] },
         },
+        remove: { type: "array", items: { type: "string" } },
       },
     },
   },
   {
-    type: "function",
-    function: {
-      name: "finish",
-      description:
-        "End with your recommendation. qloo_evidence: only facts taken from tool results (affinities, audience overlap). our_read: your interpretation and trade-offs.",
-      parameters: {
-        type: "object",
-        properties: {
-          recommendation: { type: "string", description: "2–4 sentences for the programmer." },
-          qloo_evidence: { type: "array", items: { type: "string" } },
-          our_read: { type: "array", items: { type: "string" } },
-          adopt_what_if: { type: ["string", "null"], description: "The what-if id to adopt, or null to keep the current plan." },
-        },
-        required: ["recommendation", "qloo_evidence", "our_read"],
+    name: "finish",
+    description:
+      "End with your recommendation. qloo_evidence: only facts taken from tool results (affinities, audience overlap). our_read: your interpretation and trade-offs.",
+    input_schema: {
+      type: "object",
+      properties: {
+        recommendation: { type: "string", description: "2–4 sentences for the programmer." },
+        qloo_evidence: { type: "array", items: { type: "string" } },
+        our_read: { type: "array", items: { type: "string" } },
+        adopt_what_if: { type: ["string", "null"], description: "The what-if id to adopt, or null to keep the current plan." },
       },
+      required: ["recommendation", "qloo_evidence", "our_read"],
     },
   },
 ];
@@ -179,7 +164,7 @@ export async function runAgent(
   signal?: AbortSignal,
   limits: AgentLimits = DEFAULT_LIMITS,
 ): Promise<AgentResult> {
-  const { qloo, llm } = deps;
+  const { qloo, model } = deps;
   const runtimeOf = deps.runtimeOf ?? (async () => 45);
   const baseline = await planDay(qloo, input.library);
   const whatIfs: WhatIf[] = [];
@@ -272,8 +257,7 @@ export async function runAgent(
     },
   };
 
-  const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM },
+  const messages: AgentMessage[] = [
     {
       role: "user",
       content: `Programmer's brief:\n<brief>\n${input.brief.trim() || "Make the channel flow better."}\n</brief>\n\nCurrent plan:\n${JSON.stringify(summarize(baseline))}`,
@@ -295,43 +279,49 @@ export async function runAgent(
 
   for (let step = 1; step <= limits.maxSteps; step++) {
     if (usage.promptTokens + usage.completionTokens > limits.maxTokens) return fallback(`token budget (${limits.maxTokens}) used up`);
-    const res = await llm.chat(messages, TOOLS, signal);
+    const { message, usd } = await model.turn({ system: SYSTEM, tools: TOOLS, messages }, signal);
+    const u = message.usage;
     usage.llmCalls++;
-    usage.promptTokens += res.promptTokens;
-    usage.completionTokens += res.completionTokens;
-    usage.usd += res.usd;
-    if (!usage.models.includes(res.model)) usage.models.push(res.model);
-    if (res.content.trim()) onEvent({ type: "agent_note", step, text: res.content.trim().slice(0, 800) });
+    usage.promptTokens += u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+    usage.completionTokens += u.output_tokens;
+    usage.usd += usd;
+    if (!usage.models.includes(message.model)) usage.models.push(message.model);
+    if (message.stop_reason === "refusal") return fallback("the model declined this request");
+    if (message.stop_reason === "max_tokens") return fallback("the model's reply was cut off");
 
-    if (!res.toolCalls.length) {
-      messages.push({ role: "assistant", content: res.content });
+    for (const block of message.content) {
+      if (block.type === "text" && block.text.trim()) onEvent({ type: "agent_note", step, text: block.text.trim().slice(0, 800) });
+    }
+    // Append the reply exactly as received (thinking blocks included): the history stays append-only.
+    messages.push({ role: "assistant", content: message.content });
+    const calls = message.content.filter((b): b is Extract<(typeof message.content)[number], { type: "tool_use" }> => b.type === "tool_use");
+    if (!calls.length) {
       messages.push({ role: "user", content: "Call finish with your recommendation." });
       continue;
     }
-    messages.push({ role: "assistant", content: res.content, tool_calls: res.toolCalls });
-    for (const call of res.toolCalls) {
-      const outcome = await dispatch(call, step);
+    const results: Array<{ type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }> = [];
+    for (const call of calls) {
+      const outcome = await dispatch(call.name, call.input, step);
       if ("finished" in outcome) return outcome.finished;
-      messages.push({ role: "tool", tool_call_id: call.id, content: outcome.content });
+      results.push({ type: "tool_result", tool_use_id: call.id, content: outcome.content, ...(outcome.error ? { is_error: true } : {}) });
     }
+    // Every result for this turn goes back in one user message.
+    messages.push({ role: "user", content: results });
   }
   return fallback(`step limit (${limits.maxSteps}) reached`);
 
-  async function dispatch(call: ToolCall, step: number): Promise<{ content: string } | { finished: AgentResult }> {
-    const name = call.function.name;
-    let args: Record<string, unknown>;
-    try {
-      args = (JSON.parse(call.function.arguments || "{}") ?? {}) as Record<string, unknown>;
-    } catch {
-      onEvent({ type: "agent_result_step", step, tool: name, ok: false, summary: "arguments were not valid JSON" });
-      return { content: JSON.stringify({ error: "Arguments were not valid JSON. Try again." }) };
+  async function dispatch(name: string, input: unknown, step: number): Promise<{ content: string; error?: boolean } | { finished: AgentResult }> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      onEvent({ type: "agent_result_step", step, tool: name, ok: false, summary: "arguments were not an object" });
+      return { content: JSON.stringify({ error: "Arguments must be a JSON object. Try again." }), error: true };
     }
+    const args = input as Record<string, unknown>;
     onEvent({ type: "agent_call", step, tool: name, args });
     if (name === "finish") return { finished: finishWith(args) };
     const tool = tools[name];
     if (!tool) {
       onEvent({ type: "agent_result_step", step, tool: name, ok: false, summary: "unknown tool" });
-      return { content: JSON.stringify({ error: `Unknown tool ${name}` }) };
+      return { content: JSON.stringify({ error: `Unknown tool ${name}` }), error: true };
     }
     try {
       const result = await tool(args);
@@ -340,7 +330,7 @@ export async function runAgent(
     } catch (err) {
       if (!(err instanceof ToolError)) throw err; // Cancellation and real failures end the run.
       onEvent({ type: "agent_result_step", step, tool: name, ok: false, summary: err.message });
-      return { content: JSON.stringify({ error: err.message }) };
+      return { content: JSON.stringify({ error: err.message }), error: true };
     }
   }
 

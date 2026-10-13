@@ -136,6 +136,7 @@ function loadPlan(plan) {
   renderNeedsInput();
   renderSchedule();
   renderInsights();
+  renderCompareIntro();
 }
 
 function renderNeedsInput() {
@@ -360,6 +361,56 @@ function renderInsights() {
   );
 }
 
+// ---------- vs AI alone ----------
+
+function renderCompareIntro() {
+  const btn = h("button", { class: "ghost", id: "compare-btn", onclick: runCompare }, "Compare this day with AI alone");
+  $("#tab-compare").replaceChildren(
+    h("p", {}, "Would the same AI build a day this good without Qloo? This asks Claude to schedule your library from its own knowledge, then scores both days, plus the library in listed order and 50 shuffled orders, on the same scale."),
+    btn,
+    h("p", { class: "bench-note", style: { marginTop: "10px" } }, "On the three demo libraries, Lead-In beat Claude alone every time: audience flow 0.824 vs 0.660 (Classic TV Mix), 0.893 vs 0.769 (Classic Crime), 0.942 vs 0.897 (Cozy Mysteries)."),
+  );
+}
+
+async function runCompare() {
+  const btn = $("#compare-btn");
+  btn.disabled = true;
+  btn.textContent = "Asking Claude for its own schedule…";
+  try {
+    const res = await fetch(`/api/plans/${state.plan.id}/compare`, { method: "POST" });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
+    const rows = [
+      ["Lead-In (with Qloo)", r.leadIn, true],
+      ...(r.aiOnly ? [["Claude alone (no Qloo)", r.aiOnly, false]] : []),
+      ["Library in listed order", r.listed, false],
+      [`Shuffled (average of ${r.shuffled.samples})`, r.shuffled, false],
+    ];
+    const max = Math.max(...rows.map(([, m]) => m.flow), 0.01);
+    $("#tab-compare").replaceChildren(
+      h("table", { class: "cmp" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Day"), h("th", {}, "Audience flow"), h("th", {}, ""), h("th", {}, "Weak"), h("th", {}, "Fit"))),
+        h("tbody", {}, ...rows.map(([name, m, us]) =>
+          h("tr", { class: us ? "us" : "" },
+            h("td", {}, name),
+            h("td", { class: "num" }, fmt(m.flow)),
+            h("td", {}, h("div", { class: "bar" }, h("i", { style: { width: `${Math.round((m.flow / max) * 100)}%` } }))),
+            h("td", { class: "num" }, String(Math.round(m.weakHandoffs * 10) / 10)),
+            h("td", { class: "num" }, fmt(m.fit)),
+          ))),
+      ),
+      ...(r.aiOnly
+        ? [h("p", { class: "bench-note" }, `Claude's own order: ${r.aiOnly.order.join(" → ")}${r.aiOnly.repaired ? " (looped or trimmed to fill exactly 24 hours)" : ""}.`)]
+        : [h("p", { class: "bench-note" }, `Claude alone wasn't run: ${r.aiOnlyError ?? "the agent isn't configured"}.`)]),
+      h("p", { class: "bench-note" }, "Every day is scored with the same Qloo audience overlap and Lead-In's daypart fit, so the gap shows what Qloo's data adds; it is not a measurement of real viewers. ", h("span", { class: "tag qloo" }, "Qloo says"), " ", h("span", { class: "tag ours" }, "Our read")),
+    );
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Compare this day with AI alone";
+    $("#tab-compare").append(h("p", { style: { color: "var(--weak)" } }, `Couldn't compare: ${err.message}`));
+  }
+}
+
 // ---------- Agent ----------
 
 const EXAMPLES = [
@@ -470,8 +521,8 @@ function agentCard(r, qlooCalls, cached) {
     h("p", {}, h("span", { class: "tag ours" }, "Our read")), list(r.ourRead, "ours"),
   );
   const u = r.usage;
-  const model = (u.models ?? []).map((m) => m.replace(/^nvidia\//, "")).join(", ");
-  parts.push(h("p", { class: "usage" }, `${u.llmCalls} Nemotron calls (${model}) · ${(u.promptTokens + u.completionTokens).toLocaleString()} tokens · $${u.usd.toFixed(3)} · ${qlooCalls} Qloo calls (${cached} cached)${r.stoppedBecause ? " · stopped: " + r.stoppedBecause : ""}`));
+  const model = (u.models ?? []).join(", ");
+  parts.push(h("p", { class: "usage" }, `${u.llmCalls} Claude calls (${model}) · ${(u.promptTokens + u.completionTokens).toLocaleString()} tokens · $${u.usd.toFixed(3)} · ${qlooCalls} Qloo calls (${cached} cached)${r.stoppedBecause ? " · stopped: " + r.stoppedBecause : ""}`));
   return h("div", { class: "agent-card" }, ...parts);
 }
 

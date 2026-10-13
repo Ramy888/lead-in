@@ -4,7 +4,8 @@
 // rate-limited, and planning runs are capped in number and time. Keys live only in server-side env.
 
 import { runAgent, type AgentResult } from "../agent/agent.js";
-import type { ChatModel } from "../agent/llm.js";
+import { compareDays, type Comparison } from "../bench/compare.js";
+import type { AgentModel } from "../agent/claude.js";
 import { planDay, type LibraryItem } from "../pipeline.js";
 import { snapshotOf, solverInputOf, type PlanSnapshot } from "../plan-snapshot.js";
 import { PRESETS } from "../presets.js";
@@ -26,8 +27,8 @@ export interface HandlerOptions {
   scoreLimiter?: RateLimiter;
   /** Where plans wait to be re-scored. Default: in memory for 6 hours. */
   planStore?: PlanStore;
-  /** The Nemotron agent; without it /api/agent answers 503 and the UI hides the agent. */
-  agent?: { llm: ChatModel; budget?: AgentBudget; limiter?: RateLimiter; timeoutMs?: number };
+  /** The Claude agent; without it /api/agent answers 503 and the UI hides the agent. */
+  agent?: { model: AgentModel; budget?: AgentBudget; limiter?: RateLimiter; timeoutMs?: number };
 }
 
 export interface PlanStore {
@@ -130,8 +131,11 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
   let running = 0;
   let agentsRunning = 0;
   const agentBudget = opts.agent?.budget ?? new MemoryAgentBudget();
-  // Each run spends Qloo quota and Nemotron credit: 2 at once per visitor, then one every ~3 minutes.
+  // Each run spends Qloo quota and Claude credit: 2 at once per visitor, then one every ~3 minutes.
   const agentLimiter = opts.agent?.limiter ?? new RateLimiter(2, 0.34);
+  const compareLimiter = new RateLimiter(3, 1);
+  // One answer per plan: a second click (or another judge on the same preset) costs nothing.
+  const comparisons = new TtlStore<Comparison>(200, 6 * 60 * 60 * 1000);
 
   /** Fills missing runtimes from TMDB (cached); 45 min when TMDB has nothing. */
   async function withRuntimes(library: PlanRequest["library"]): Promise<LibraryItem[]> {
@@ -236,9 +240,9 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
       if (!closed) controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
     }
     // Every model call is charged to the global budget as it happens, even if the run later fails.
-    const llm: ChatModel = {
-      chat: async (messages, tools, signal) => {
-        const res = await agent.llm.chat(messages, tools, signal);
+    const model: AgentModel = {
+      turn: async (req, signal) => {
+        const res = await agent.model.turn(req, signal);
         agentBudget.spend(res.usd);
         return res;
       },
@@ -251,7 +255,7 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
       }, agent.timeoutMs ?? 120_000);
       try {
         const runtimeOf = async (item: { name: string; year?: number }) => (await withRuntimes([item]))[0]!.runtimeMinutes;
-        const result = await runAgent({ llm, qloo: client, runtimeOf }, { library: (await withRuntimes(request.library)), brief }, write, abort.signal);
+        const result = await runAgent({ model, qloo: client, runtimeOf }, { library: (await withRuntimes(request.library)), brief }, write, abort.signal);
         write({ type: "agent_done", result: agentView(result, client) });
       } catch (err) {
         const message = abort.signal.aborted ? "The agent took too long and was stopped" : err instanceof Error ? err.message : "Agent failed";
@@ -291,6 +295,31 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
     };
   }
 
+  /** Lead-In's day vs the same Claude model scheduling without Qloo, plus listed and shuffled orders. */
+  async function comparePlan(clientKey: string, id: string): Promise<Response> {
+    const plan = plans.get(id);
+    if (!plan) throw new HttpError(404, "Plan not found or expired; plan the channel again");
+    const done = comparisons.get(id);
+    if (done) return jsonResponse(200, done);
+    const agent = opts.agent;
+    if (!agent) return jsonResponse(200, await compareDays(plan, null));
+    if (!compareLimiter.take(clientKey)) throw new HttpError(429, "Too many comparisons; try again in a minute");
+    const blocked = agentBudget.blocked();
+    const model = blocked
+      ? null
+      : {
+          turn: async (req: Parameters<AgentModel["turn"]>[0], signal?: AbortSignal) => {
+            const res = await agent.model.turn(req, signal);
+            agentBudget.spend(res.usd);
+            return res;
+          },
+        };
+    const result = await compareDays(plan, model, { signal: AbortSignal.timeout(90_000) });
+    if (blocked) result.aiOnlyError = blocked;
+    if (result.aiOnly) comparisons.set(id, result);
+    return jsonResponse(200, result);
+  }
+
   async function scorePlan(req: Request, clientKey: string, id: string): Promise<Response> {
     if (!scoreLimiter.take(clientKey)) throw new HttpError(429, "Too many requests");
     const plan = plans.get(id);
@@ -317,6 +346,8 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
       if (req.method === "POST" && path === "/api/agent") return await runAgentRequest(req, clientKey);
       const score = path.match(/^\/api\/plans\/([0-9a-f-]{36})\/score$/);
       if (req.method === "POST" && score) return await scorePlan(req, clientKey, score[1]!);
+      const compare = path.match(/^\/api\/plans\/([0-9a-f-]{36})\/compare$/);
+      if (req.method === "POST" && compare) return await comparePlan(clientKey, compare[1]!);
       throw new HttpError(404, "Not found");
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;

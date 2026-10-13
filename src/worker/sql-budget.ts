@@ -1,5 +1,5 @@
 // The agent's spend guard in the Coordinator's SQLite, so an evicted Durable Object can't reset it:
-// runs per UTC day, and Nemotron spend (USD, from list prices) since the deploy.
+// runs per UTC day, and Claude spend (USD, from list prices) since the deploy.
 
 import { dayOf, type AgentBudget } from "../server/limits.js";
 

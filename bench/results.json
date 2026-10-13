@@ -1,0 +1,184 @@
+{
+  "date": "2026-10-13",
+  "model": "claude-opus-5-5",
+  "attempts": 3,
+  "results": [
+    {
+      "preset": "Classic Crime & Action",
+      "shows": 12,
+      "leadIn": {
+        "flow": 0.893,
+        "weakHandoffs": 0,
+        "fit": 0.564,
+        "violations": 0
+      },
+      "aiOnly": {
+        "flow": 0.769,
+        "weakHandoffs": 0.333,
+        "fit": 0.495,
+        "violations": 0
+      },
+      "aiOnlyAttempts": [
+        {
+          "flow": 0.747,
+          "weakHandoffs": 0,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0262
+        },
+        {
+          "flow": 0.771,
+          "weakHandoffs": 0,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0165
+        },
+        {
+          "flow": 0.789,
+          "weakHandoffs": 1,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0189
+        }
+      ],
+      "listed": {
+        "flow": 0.812,
+        "weakHandoffs": 1,
+        "fit": 0.47,
+        "violations": 0
+      },
+      "shuffled": {
+        "flow": 0.614,
+        "weakHandoffs": 2.44,
+        "fit": 0.482,
+        "violations": 0.12,
+        "samples": 50
+      },
+      "errors": []
+    },
+    {
+      "preset": "Classic TV Mix",
+      "shows": 9,
+      "leadIn": {
+        "flow": 0.824,
+        "weakHandoffs": 1,
+        "fit": 0.547,
+        "violations": 0
+      },
+      "aiOnly": {
+        "flow": 0.66,
+        "weakHandoffs": 3,
+        "fit": 0.503,
+        "violations": 0.667
+      },
+      "aiOnlyAttempts": [
+        {
+          "flow": 0.686,
+          "weakHandoffs": 3,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0196
+        },
+        {
+          "flow": 0.625,
+          "weakHandoffs": 3,
+          "violations": 1,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0151
+        },
+        {
+          "flow": 0.67,
+          "weakHandoffs": 3,
+          "violations": 1,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0174
+        }
+      ],
+      "listed": {
+        "flow": 0.669,
+        "weakHandoffs": 9,
+        "fit": 0.488,
+        "violations": 0
+      },
+      "shuffled": {
+        "flow": 0.456,
+        "weakHandoffs": 10.8,
+        "fit": 0.489,
+        "violations": 0,
+        "samples": 50
+      },
+      "errors": []
+    },
+    {
+      "preset": "Cozy Mysteries",
+      "shows": 4,
+      "leadIn": {
+        "flow": 0.942,
+        "weakHandoffs": 0,
+        "fit": 0.468,
+        "violations": 0
+      },
+      "aiOnly": {
+        "flow": 0.897,
+        "weakHandoffs": 0,
+        "fit": 0.41,
+        "violations": 0.333
+      },
+      "aiOnlyAttempts": [
+        {
+          "flow": 0.889,
+          "weakHandoffs": 0,
+          "violations": 1,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0137
+        },
+        {
+          "flow": 0.901,
+          "weakHandoffs": 0,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0103
+        },
+        {
+          "flow": 0.902,
+          "weakHandoffs": 0,
+          "violations": 0,
+          "repaired": false,
+          "unknownTitles": [],
+          "model": "claude-opus-5-5",
+          "usd": 0.0132
+        }
+      ],
+      "listed": {
+        "flow": 0.912,
+        "weakHandoffs": 0,
+        "fit": 0.442,
+        "violations": 1
+      },
+      "shuffled": {
+        "flow": 0.894,
+        "weakHandoffs": 0,
+        "fit": 0.434,
+        "violations": 0.78,
+        "samples": 50
+      },
+      "errors": []
+    }
+  ]
+}

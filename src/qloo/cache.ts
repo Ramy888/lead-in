@@ -26,8 +26,8 @@ export class CachingClient implements QlooClient {
     private readonly maxEntries = 2000,
     private readonly ttlMs = 7 * 24 * 60 * 60 * 1000,
     private readonly store?: CacheStore,
-    /** How long an expired answer is kept as a fallback for when Qloo fails. The demo must outlive the
-     *  hackathon key (Nebius judging runs to Dec 15; Qloo only promises the key through Nov 17). */
+    /** How long an expired answer is kept as a fallback for when Qloo fails (an outage, or the hackathon key
+     *  being switched off: Qloo only promises it through judging, which ends Nov 17). */
     private readonly keepStaleMs = 120 * 24 * 60 * 60 * 1000,
   ) {
     if (!store) return;

@@ -45,7 +45,7 @@ export class TtlStore<T> {
   }
 }
 
-/** Global spend guard for the agent: a daily run cap and a total Nemotron budget (USD). */
+/** Global spend guard for the agent: a daily run cap and a total Claude budget (USD). */
 export interface AgentBudget {
   /** Why a new run can't start, or null if it can. */
   blocked(now?: number): string | null;

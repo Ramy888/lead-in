@@ -26,10 +26,10 @@ The taste signals come from [Qloo](https://www.qloo.com/): show-to-show audience
    show airs at least once, and the day wraps at midnight. The solver uses beam search, then local search with seeded kicks.
 5. **Gaps → licensing:** weak dayparts get title suggestions from Qloo `recommend`, ranked by fit for that daypart.
 
-## The agent (NVIDIA Nemotron on Nebius Token Factory)
+## The agent (Claude)
 
 The planner gives you a good day; the agent works on what you actually want. Type a goal ("fix the worst
-handoff; I can license one title") and Nemotron 3 Ultra runs a tool loop (`src/agent/agent.ts`):
+handoff; I can license one title") and Claude Opus 5.5 runs a tool loop (`src/agent/agent.ts`):
 
 | Tool | What it does |
 |---|---|
@@ -39,14 +39,31 @@ handoff; I can license one title") and Nemotron 3 Ultra runs a tool loop (`src/a
 | `get_plan(id?)` | Reads the current plan or a what-if |
 | `finish(...)` | Recommendation, with Qloo-sourced facts and Lead-In's own reading kept in separate lists |
 
-Example (live, Classic TV Mix): the agent called `find_bridge(M*A*S*H → Baywatch)`, Qloo suggested The A-Team,
-`what_if(+The A-Team)` removed the only weak handoff and raised flow 0.824 → 0.847, and the agent adopted it.
-3 model calls, ~7k tokens, about $0.01. One click loads the new day into the grid.
+Example (live, Classic TV Mix): in one turn Claude called `find_bridge(M*A*S*H → Baywatch)` and `what_if(−Baywatch)`;
+Qloo suggested The A-Team, `what_if(+The A-Team)` removed the only weak handoff and raised flow 0.824 → 0.847, while
+dropping Baywatch only moved the problem (0.806, a new weak handoff). It adopted The A-Team. 3 model calls, ~$0.04.
 
-Guardrails: at most 8 steps, 3 what-ifs and 2 added titles each, a token budget, a 2-minute timeout that
-also stops Qloo calls; per-visitor rate limit; one run at a time; and a persisted daily-run cap and total
-Nemotron spend cap (`AGENT_MAX_RUNS_PER_DAY`, `AGENT_MAX_USD`). Ultra falls back to Nemotron 3 Super on errors.
-The model sees only show titles, Qloo IDs and scores; the brief is treated as a request, not instructions.
+Guardrails: at most 8 steps, 3 what-ifs and 2 added titles each, a token budget, a 2-minute timeout that also
+stops Qloo calls; per-visitor rate limit; one run at a time; and a persisted daily-run cap and total spend cap
+(`AGENT_MAX_RUNS_PER_DAY`, `AGENT_MAX_USD`). Requests use adaptive thinking at medium effort, prompt caching, and
+server-side refusal fallbacks. The model sees only show titles, Qloo IDs and scores; the brief is a request, not instructions.
+
+## Does it need Qloo? (benchmark)
+
+`npm run bench` builds each demo library's day four ways and scores them all on the same scale:
+Lead-In (Qloo), **the same Claude model scheduling from its own knowledge** with the same goal and rules, the
+library in listed order, and 50 shuffled orders. Results (`bench/results.json`, Oct 13 2026, 3 Claude attempts each):
+
+| Library | Lead-In (Qloo) | Claude alone | Listed order | Shuffled |
+|---|---|---|---|---|
+| Classic TV Mix (9 shows) | **0.824** flow, 1 weak handoff | 0.660, 3 weak | 0.669, 9 weak | 0.456, 10.8 weak |
+| Classic Crime & Action (12) | **0.893**, 0 weak | 0.769, 0.3 weak | 0.812, 1 weak | 0.614, 2.4 weak |
+| Cozy Mysteries (4) | **0.942** | 0.897 | 0.912 | 0.894 |
+
+Claude alone produced complete, rule-respecting days but couldn't tell which shows share an audience the way
+Qloo measures it. Caveat: the scale itself comes from Qloo's audience overlap and Lead-In's daypart model, so this
+shows what Qloo's data adds to scheduling, not a measurement of real viewers. The "vs AI alone" tab runs the same
+comparison on any planned day.
 
 Every Qloo call is recorded in a redacted trace (`src/qloo/trace.ts`) for the request-to-result walkthrough.
 
@@ -83,7 +100,8 @@ npm install
 npm test            # unit tests (solver checked against brute force)
 npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in ../.env, synthetic otherwise
 npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
-npm run agent:smoke # one live agent run (Nemotron + Qloo, a cent or two); PRESET=1 for Classic TV Mix
+npm run agent:smoke # one live agent run (Claude + Qloo, a few cents); PRESET=1 for Classic TV Mix
+npm run bench       # Lead-In vs Claude alone vs listed vs shuffled on every preset (~$0.15)
 npm run dev         # API + UI on :8080 (Node)
 npm run cf:dev      # the same app on the Cloudflare runtime (needs .dev.vars, below)
 ```
@@ -99,7 +117,7 @@ in the object's SQLite, so they survive eviction and redeploys. Rate limits key 
 npx wrangler login
 npx wrangler secret put QLOO_API_KEY            # prompts for the value
 npx wrangler secret put TMDB_READ_ACCESS_TOKEN
-npx wrangler secret put NEBIUS_API_KEY             # enables the agent
+npx wrangler secret put ANTHROPIC_API_KEY          # enables the agent and the AI-alone comparison
 npm run cf:deploy                                # typecheck + tests + wrangler deploy
 ```
 
@@ -107,7 +125,7 @@ For `npm run cf:dev`, put the same keys in `.dev.vars` (gitignored). A `Dockerfi
 container hosts (mount a volume at `/data` for the cache).
 
 Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN` and
-`NEBIUS_API_KEY` (the agent);
+`ANTHROPIC_API_KEY` (the agent);
 for Node also `QLOO_CACHE_FILE`, `PORT`, `TRUST_PROXY=1` behind a proxy.
 
 ## Data and privacy
