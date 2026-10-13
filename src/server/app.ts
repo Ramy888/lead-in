@@ -130,10 +130,10 @@ export function createApp(opts: AppOptions): Server {
         out.push({ ...rest, runtimeMinutes });
         continue;
       }
-      const key = item.name.toLowerCase();
+      const key = `${item.name.toLowerCase()}|${item.year ?? ""}`;
       let rt = runtimes.get(key);
       if (rt === undefined && opts.tmdb) {
-        rt = (await opts.tmdb.importShow(item.name).catch(() => null))?.runtimeMinutes ?? 45;
+        rt = (await opts.tmdb.importShow(item.name, item.year).catch(() => null))?.runtimeMinutes ?? 45;
         runtimes.set(key, rt);
       }
       out.push({ ...rest, runtimeMinutes: rt ?? 45 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { handoffScore } from "../src/matrix/overlap.js";
 import { planDay, unitsFor } from "../src/pipeline.js";
 import { FakeQlooClient } from "../src/qloo/fake.js";
 
@@ -33,6 +34,12 @@ describe("planDay", () => {
     expect(plan.license.length).toBeGreaterThan(0);
     const library = new Set(plan.shows.map((s) => s.id));
     expect(plan.license.every((l) => !library.has(l.title.id))).toBe(true);
+    // The shown match is the mapped affinity, and each daypart's list is ranked on fit × match.
+    for (const l of plan.license) expect(l.match).toBe(handoffScore(l.affinity));
+    for (const d of new Set(plan.license.map((l) => l.daypart))) {
+      const rank = plan.license.filter((l) => l.daypart === d).map((l) => l.fit * l.match);
+      expect(rank).toEqual([...rank].sort((a, b) => b - a));
+    }
   });
 });
 

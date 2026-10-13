@@ -44,8 +44,12 @@ export class TmdbClient {
     return (await res.json()) as T;
   }
 
-  async importShow(name: string): Promise<ImportedShow | null> {
-    const search = await this.get<{ results: Array<{ id: number }> }>("/search/tv", { query: name });
+  /** `year` (first air year) picks the original over a same-named remake. */
+  async importShow(name: string, year?: number): Promise<ImportedShow | null> {
+    const search = await this.get<{ results: Array<{ id: number }> }>("/search/tv", {
+      query: name,
+      ...(year ? { first_air_date_year: String(year) } : {}),
+    });
     const hit = search.results[0];
     if (!hit) return null;
 
@@ -71,11 +75,11 @@ export class TmdbClient {
     }
     if (!runtimeMinutes) return null;
 
-    const year = details.first_air_date ? Number(details.first_air_date.slice(0, 4)) : undefined;
+    const firstYear = details.first_air_date ? Number(details.first_air_date.slice(0, 4)) : undefined;
     return {
       tmdbId: details.id,
       name: details.name,
-      ...(year ? { year } : {}),
+      ...(firstYear ? { year: firstYear } : {}),
       runtimeMinutes,
       runtimeSource,
       genres: (details.genres ?? []).map((g) => g.name),

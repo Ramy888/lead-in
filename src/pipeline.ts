@@ -1,7 +1,7 @@
 // End-to-end: show names + runtimes in, a 24h schedule with weak handoffs, weak dayparts and titles to
 // license out. Used by the CLI demo now and the HTTP API later. The Qloo client decides data provenance.
 
-import { fromAffinities, type OverlapMatrix } from "./matrix/overlap.js";
+import { fromAffinities, handoffScore, type OverlapMatrix } from "./matrix/overlap.js";
 import type { Candidate, Demographics, Entity, QlooClient } from "./qloo/types.js";
 import { DAYPARTS, DEFAULT_CLOCK, demographicFit, fitFunction, weakDayparts, type DaypartGap } from "./solver/dayparts.js";
 import { solve, type SolveResult, type SolverInput, type SolverShow } from "./solver/solve.js";
@@ -33,6 +33,8 @@ export interface LicenseSuggestion {
   title: Entity;
   /** Qloo affinity to the library as a whole. */
   affinity: number;
+  /** Our 0..1 reading of that affinity, on the same scale as handoff scores. */
+  match: number;
   /** Our daypart-fit estimate for the title. */
   fit: number;
 }
@@ -119,9 +121,11 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
         daypart: gap.daypart,
         title: c.entity,
         affinity: c.affinity,
+        match: handoffScore(c.affinity),
         fit: demographicFit(candidateDemo[i]!.data, profile),
       }));
-      scored.sort((a, b) => b.fit * b.affinity - a.fit * a.affinity);
+      // Raw affinities differ only in the second decimal, so rank on the mapped match.
+      scored.sort((a, b) => b.fit * b.match - a.fit * a.match);
       license.push(...scored.slice(0, 3));
     }
   }

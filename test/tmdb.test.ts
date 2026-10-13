@@ -36,6 +36,14 @@ describe("TmdbClient.importShow", () => {
     expect(calls.some((c) => c.url.includes("/season/"))).toBe(false);
   });
 
+  it("narrows the search to the first air year when one is given", async () => {
+    const { fetchFn, calls } = stubFetch({ "/3/search/tv": { results: [] } });
+    await new TmdbClient({ token: "t", fetchFn }).importShow("Matlock", 1986);
+    expect(new URL(calls[0]!.url).searchParams.get("first_air_date_year")).toBe("1986");
+    await new TmdbClient({ token: "t", fetchFn }).importShow("Matlock");
+    expect(new URL(calls[1]!.url).searchParams.has("first_air_date_year")).toBe(false);
+  });
+
   it("returns null when nothing matches", async () => {
     const { fetchFn } = stubFetch({ "/3/search/tv": { results: [] } });
     expect(await new TmdbClient({ token: "t", fetchFn }).importShow("zzz")).toBeNull();

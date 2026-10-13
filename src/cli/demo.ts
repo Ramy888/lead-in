@@ -28,7 +28,7 @@ plan.schedule.slots.forEach((slot, i) => {
 });
 
 console.log("\nWeak dayparts:", plan.gaps.length ? plan.gaps.map((g) => `${g.daypart} (${g.meanFit})`).join(", ") : "none");
-for (const s of plan.license) console.log(`  license for ${s.daypart}: ${s.title.name} (affinity ${s.affinity}, fit ${s.fit.toFixed(2)})`);
+for (const s of plan.license) console.log(`  license for ${s.daypart}: ${s.title.name} (match ${s.match.toFixed(2)}, affinity ${s.affinity.toFixed(3)}, fit ${s.fit.toFixed(2)})`);
 for (const u of plan.unresolved) {
   console.log(`\nNeeds input: "${u.name}" (${u.status}) → ${(u.candidates ?? []).map((c) => c.name).join(" | ")}`);
 }

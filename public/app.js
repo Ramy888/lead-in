@@ -154,7 +154,7 @@ function renderNeedsInput() {
               onclick: () => {
                 const item = state.library.find((s) => s.name.toLowerCase() === u.name.toLowerCase());
                 // Send the picked ID: two shows can share a title (Matlock 1986 and 2024).
-                if (item) Object.assign(item, { name: c.name, qlooId: c.id });
+                if (item) Object.assign(item, { name: c.name, qlooId: c.id, ...(Number(c.hint) ? { year: Number(c.hint) } : {}) });
                 renderLibrary();
                 planChannel();
               },
@@ -312,10 +312,10 @@ function renderInsights() {
       h("h4", {}, h("span", {}, `${g.daypart}: weak fit`), h("span", { class: "tag ours" }, `Our read · ${fmt(g.meanFit)}`)),
       sugg.length
         ? h("div", { class: "suggest" },
-            h("span", { class: "h" }, "License"), h("span", { class: "h" }, "Affinity"), h("span", { class: "h" }, "Fit"),
-            ...sugg.flatMap((s) => [h("span", {}, s.title.name), h("span", { class: "num" }, fmt(s.affinity)), h("span", { class: "num" }, fmt(s.fit))]))
+            h("span", { class: "h" }, "License"), h("span", { class: "h" }, "Match"), h("span", { class: "h" }, "Fit"),
+            ...sugg.flatMap((s) => [h("span", {}, s.title.name), h("span", { class: "num", title: `Qloo affinity ${s.affinity.toFixed(3)}` }, fmt(s.match)), h("span", { class: "num" }, fmt(s.fit))]))
         : h("p", { class: "empty" }, "Qloo returned no candidates outside your library."),
-      h("p", { class: "empty", style: { margin: "8px 0 0", fontSize: "12px" } }, "Affinity: ", sourceTag(), " · fit for this daypart: ", h("span", { class: "tag ours" }, "Our read")),
+      h("p", { class: "empty", style: { margin: "8px 0 0", fontSize: "12px" } }, "Match: Qloo affinity to your library ", sourceTag(), ", mapped to 0–1 like handoffs (hover for the raw value) · fit for this daypart: ", h("span", { class: "tag ours" }, "Our read")),
     ));
   }
   if (p.notAired.length) gaps.push(h("p", { class: "notaired" }, `Not aired today (the library runs longer than 24h): ${p.notAired.map((id) => names.get(id)).join(", ")}`));
