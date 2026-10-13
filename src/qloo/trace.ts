@@ -10,6 +10,7 @@ export interface TraceEntry {
   ms: number;
   resultCount: number;
   cached?: boolean;
+  stale?: boolean;
   errorCode?: string;
 }
 
@@ -83,6 +84,7 @@ export class TracingClient implements QlooClient {
       ms: Math.round(performance.now() - started),
       resultCount: countOf(env),
       ...(env.cached ? { cached: true } : {}),
+      ...(env.stale ? { stale: true } : {}),
       ...(env.error ? { errorCode: env.error.code } : {}),
     };
     this.trace.push(entry);

@@ -351,7 +351,7 @@ function renderInsights() {
       h("td", {}, String(i + 1)),
       h("td", {}, t.tool.replace("qloo_", "")),
       h("td", {}, JSON.stringify(t.params)),
-      h("td", { class: `st-${t.status}` }, t.status + (t.cached ? " · cached" : "")),
+      h("td", { class: `st-${t.status}`, title: t.stale ? "Qloo didn't answer; this is an older cached answer" : "" }, t.status + (t.stale ? " · cached (old)" : t.cached ? " · cached" : "")),
       h("td", {}, `${t.ms}ms`),
     ));
   $("#tab-trace").replaceChildren(

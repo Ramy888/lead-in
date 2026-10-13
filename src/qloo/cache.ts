@@ -26,13 +26,20 @@ export class CachingClient implements QlooClient {
     private readonly maxEntries = 2000,
     private readonly ttlMs = 7 * 24 * 60 * 60 * 1000,
     private readonly store?: CacheStore,
+    /** How long an expired answer is kept as a fallback for when Qloo fails. The demo must outlive the
+     *  hackathon key (Nebius judging runs to Dec 15; Qloo only promises the key through Nov 17). */
+    private readonly keepStaleMs = 120 * 24 * 60 * 60 * 1000,
   ) {
     if (!store) return;
     const now = Date.now();
     for (const [key, entry] of store.load()) {
-      if (entry.expires > now && this.entries.size < this.maxEntries) this.entries.set(key, entry);
+      if (this.usable(entry, now) && this.entries.size < this.maxEntries) this.entries.set(key, entry);
       else store.delete(key);
     }
+  }
+
+  private usable(entry: CacheEntry, now: number): boolean {
+    return entry.expires + this.keepStaleMs > now;
   }
 
   get synthetic(): boolean {
@@ -49,8 +56,9 @@ export class CachingClient implements QlooClient {
   }
 
   private async cached<T>(key: string, call: () => Promise<Envelope<T>>): Promise<Envelope<T>> {
+    const now = Date.now();
     const hit = this.entries.get(key);
-    if (hit && hit.expires > Date.now()) {
+    if (hit && hit.expires > now) {
       // Re-insert so the Map's insertion order doubles as least-recently-used order.
       this.entries.delete(key);
       this.entries.set(key, hit);
@@ -58,6 +66,8 @@ export class CachingClient implements QlooClient {
     }
     const value = await call();
     if (value.status === "ok" || value.status === "empty") this.put(key, value);
+    // Qloo failed (down, key revoked, quota reserve): an old answer beats no answer.
+    else if (value.status === "error" && hit && this.usable(hit, now)) return { ...(hit.value as Envelope<T>), cached: true, stale: true };
     return value;
   }
 
@@ -101,7 +111,18 @@ export class CachingClient implements QlooClient {
     if (!missing.length) return { status: known.length ? "ok" : "empty", data: known, cached: true };
 
     const fresh = await this.inner.affinities(from, missing);
-    if (fresh.status !== "ok" && fresh.status !== "empty") return known.length ? { ...fresh, data: [...known, ...(fresh.data ?? [])] } : fresh;
+    if (fresh.status !== "ok" && fresh.status !== "empty") {
+      // Fall back to expired pairs where we have them; pairs we never had stay missing (reported as gaps).
+      const old = missing.flatMap((t) => {
+        const hit = this.entries.get(pairKey(t));
+        return hit && this.usable(hit, now) ? [hit.value.data as Recommendation[]] : [];
+      });
+      const stale = old.length > 0;
+      const data = [...known, ...old.flat(), ...(fresh.data ?? [])];
+      if (!data.length && !stale) return fresh;
+      const complete = old.length === missing.length;
+      return { ...fresh, status: complete ? (data.length ? "ok" : "empty") : "partial", data, cached: true, ...(stale ? { stale: true } : {}) };
+    }
     const byId = new Map((fresh.data ?? []).map((r) => [r.entity.id, r]));
     for (const t of missing) {
       // A target Qloo didn't score is cached as an empty answer, so it isn't asked again either.

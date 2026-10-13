@@ -83,4 +83,50 @@ describe("CachingClient", () => {
     for (const n of ["Columbo", "Matlock", "Baywatch"]) await cache.describe(n, "tv_show");
     expect(cache.size).toBe(2);
   });
+
+  it("serves an expired answer, marked stale, when Qloo fails (and only then)", async () => {
+    const fake = new FakeQlooClient();
+    let down = false;
+    const flaky: QlooClient = {
+      synthetic: true,
+      describe: (n, t, h) => (down ? Promise.resolve({ status: "error", error: { code: "http_401", message: "key revoked" } }) : fake.describe(n, t, h)),
+      recommend: fake.recommend.bind(fake),
+      audienceDemographics: fake.audienceDemographics.bind(fake),
+      affinities: (f, t) => (down ? Promise.resolve({ status: "error", error: { code: "http_401", message: "key revoked" } }) : fake.affinities(f, t)),
+    };
+    // ttl 0: everything is expired at once, so every lookup goes back to Qloo first.
+    const cache = new CachingClient(flaky, 100, 0);
+    const col = (await cache.describe("Columbo", "tv_show")).data!;
+    const [msw, bay] = await Promise.all(["Murder, She Wrote", "Baywatch"].map(async (n) => (await fake.describe(n, "tv_show")).data!));
+    const row = await cache.affinities(col, [msw!]);
+
+    down = true;
+    expect(await cache.describe("Columbo", "tv_show")).toMatchObject({ status: "ok", stale: true, cached: true, data: col });
+    const staleRow = await cache.affinities(col, [msw!]);
+    expect(staleRow).toMatchObject({ status: "ok", stale: true });
+    expect(staleRow.data).toEqual(row.data);
+    // A pair never fetched can't be made up: the row is partial and Baywatch stays a gap.
+    const mixed = await cache.affinities(col, [msw!, bay!]);
+    expect(mixed.status).toBe("partial");
+    expect(mixed.data!.map((r) => r.entity.name)).toEqual(["Murder, She Wrote"]);
+    // Nothing cached at all: the error passes through.
+    expect(await cache.describe("Matlock", "tv_show")).toMatchObject({ status: "error" });
+  });
+
+  it("drops entries past the stale window when loading from a store", async () => {
+    const now = Date.now();
+    const store = {
+      saved: [
+        ["describe|tv_show|columbo||", { value: { status: "ok", data: { id: "A", name: "Columbo", type: "tv_show" } }, expires: now - 1000 }],
+        ["describe|tv_show|baywatch||", { value: { status: "ok", data: { id: "B", name: "Baywatch", type: "tv_show" } }, expires: now - 10_000 }],
+      ] as Array<[string, { value: { status: "ok"; data: unknown }; expires: number }]>,
+      deleted: [] as string[],
+      load() { return this.saved; },
+      set() {},
+      delete(k: string) { this.deleted.push(k); },
+    };
+    const cache = new CachingClient(new FakeQlooClient(), 10, 60_000, store, 5_000);
+    expect(cache.size).toBe(1);
+    expect(store.deleted).toEqual(["describe|tv_show|baywatch||"]);
+  });
 });

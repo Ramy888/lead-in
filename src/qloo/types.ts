@@ -30,6 +30,8 @@ export interface Envelope<T> {
   error?: { code: string; message: string; recovery?: string };
   /** Set by CachingClient when the answer came from cache rather than a fresh Qloo call. */
   cached?: boolean;
+  /** Set when Qloo failed and an expired cached answer was served instead. */
+  stale?: boolean;
 }
 
 export interface Entity {
