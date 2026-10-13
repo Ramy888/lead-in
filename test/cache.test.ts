@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CachingClient } from "../src/qloo/cache.js";
+import { FileCacheStore } from "../src/qloo/cache-file.js";
 import { FakeQlooClient } from "../src/qloo/fake.js";
 import type { QlooClient } from "../src/qloo/types.js";
 
@@ -59,15 +60,15 @@ describe("CachingClient", () => {
     const { tmpdir } = await import("node:os");
     const file = join(mkdtempSync(join(tmpdir(), "leadin-cache-")), "qloo.json");
     const first = counting(new FakeQlooClient());
-    const a = new CachingClient(first.client, 10, 60_000, file);
+    const a = new CachingClient(first.client, 10, 60_000, new FileCacheStore(file));
     await a.describe("Columbo", "tv_show");
     a.flush();
     const second = counting(new FakeQlooClient());
-    const b = new CachingClient(second.client, 10, 60_000, file);
+    const b = new CachingClient(second.client, 10, 60_000, new FileCacheStore(file));
     expect(await b.describe("Columbo", "tv_show")).toMatchObject({ status: "ok", cached: true });
     expect(second.calls).toEqual([]);
     const expired = counting(new FakeQlooClient());
-    const c = new CachingClient(expired.client, 10, 60_000, file);
+    const c = new CachingClient(expired.client, 10, 60_000, new FileCacheStore(file));
     (c as unknown as { entries: Map<string, { expires: number }> }).entries.forEach((e) => (e.expires = 0));
     await c.describe("Columbo", "tv_show");
     expect(expired.calls).toEqual(["describe"]);

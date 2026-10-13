@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lead-in",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  // The UI is static assets; only /api/* runs the Worker, which forwards it to the one Coordinator.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  // One global Durable Object: the Qloo key's 5/s and 10,000/month limits are global, so the throttle,
+  // quota reserve, cache and plan store must be too. Traffic is a demo's, so one instance is enough.
+  "durable_objects": {
+    "bindings": [{ "name": "COORDINATOR", "class_name": "Coordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] }],
+  // Set with `wrangler secret put` (deployed) or .dev.vars (local); never in this file.
+  "secrets": { "required": ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN"] },
+  "observability": { "enabled": true }
+}

@@ -95,6 +95,22 @@ describe("API", () => {
   });
 });
 
+describe("API plan store", () => {
+  it("re-scores a plan after a restart when plans live in a shared store", async () => {
+    // Stands in for the Durable Object's SQLite: JSON in, JSON out, outliving the server that wrote it.
+    const rows = new Map<string, string>();
+    const planStore = { get: (id: string) => (rows.has(id) ? JSON.parse(rows.get(id)!) : undefined), set: (id: string, p: unknown) => void rows.set(id, JSON.stringify(p)) };
+    const first = await start({ planStore });
+    const { lines } = await plan(first, { library: LIB });
+    const made = lines.at(-1).plan;
+    const restarted = await start({ planStore });
+    const seq = made.schedule.slots.map((s: { showId: string }) => s.showId);
+    const res = await fetch(`${restarted}/api/plans/${made.id}/score`, { method: "POST", body: JSON.stringify({ sequence: seq }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).flow).toBe(made.schedule.flow);
+  });
+});
+
 describe("API resilience", () => {
   it("stops calling Qloo once a plan times out, and keeps serving", async () => {
     const fake = new FakeQlooClient();

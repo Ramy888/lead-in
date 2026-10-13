@@ -49,7 +49,8 @@ export class RestQlooClient implements QlooClient {
   constructor(private readonly opts: RestOptions) {
     if (!opts.apiKey) throw new Error("QLOO_API_KEY missing");
     this.base = opts.baseUrl ?? "https://hackathon.api.qloo.com";
-    this.fetchFn = opts.fetchFn ?? fetch;
+    // Wrapped, not stored bare: Workers throw "Illegal invocation" if fetch is called with `this` = the client.
+    this.fetchFn = opts.fetchFn ?? ((input, init) => fetch(input, init));
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 

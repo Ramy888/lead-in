@@ -81,6 +81,15 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     }
   }
 
+  if (!shows.length) {
+    // Say why nothing could be scheduled, instead of letting the solver report an empty library.
+    throw new Error(
+      unresolved.some((u) => u.status === "error")
+        ? "Qloo couldn't be reached, so no titles could be looked up. Try again in a minute."
+        : "No title matched exactly one Qloo TV show. Use full titles, such as “Law & Order”.",
+    );
+  }
+
   const demographics = new Map<string, Demographics | undefined>();
   const demoResults = await Promise.all(shows.map((show) => client.audienceDemographics(show)));
   shows.forEach((show, i) => demographics.set(show.id, demoResults[i]!.status === "ok" ? demoResults[i]!.data : undefined));

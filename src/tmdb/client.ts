@@ -30,7 +30,8 @@ export class TmdbClient {
 
   constructor(private readonly opts: Options) {
     if (!opts.token && !opts.apiKey) throw new Error("TMDB credentials missing");
-    this.fetchFn = opts.fetchFn ?? fetch;
+    // Wrapped, not stored bare: Workers throw "Illegal invocation" if fetch is called with `this` = the client.
+    this.fetchFn = opts.fetchFn ?? ((input, init) => fetch(input, init));
   }
 
   private async get<T>(path: string, query: Record<string, string> = {}): Promise<T> {

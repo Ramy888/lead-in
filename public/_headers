@@ -1,0 +1,4 @@
+/*
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: https://image.tmdb.org; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer

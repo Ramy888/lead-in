@@ -18,13 +18,21 @@ const TOKEN_LIKE = /[A-Za-z0-9_\-]{32,}/g;
 // Qloo entity IDs are UUIDs: long, but public and needed in the walkthrough.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SECRET_ENV = ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN", "TMDB_API_KEY", "ANTHROPIC_API_KEY"];
+const registered = new Set<string>();
+
+/** Secrets that live outside process.env (a Cloudflare Worker's env) are registered here to be masked. */
+export function registerSecrets(values: Array<string | undefined>): void {
+  for (const v of values) if (v && v.length >= 8) registered.add(v);
+}
+
+function secrets(): string[] {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
+  return [...registered, ...SECRET_ENV.map((n) => env[n]).filter((v): v is string => !!v && v.length >= 8)];
+}
 
 function maskSecrets(text: string): string {
   // The configured secrets are masked by value too, whatever their shape (a key could look like a UUID).
-  for (const name of SECRET_ENV) {
-    const secret = process.env[name];
-    if (secret && secret.length >= 8) text = text.split(secret).join("[redacted]");
-  }
+  for (const secret of secrets()) text = text.split(secret).join("[redacted]");
   return text.replace(TOKEN_LIKE, (m) => (UUID.test(m) ? m : "[redacted]"));
 }
 

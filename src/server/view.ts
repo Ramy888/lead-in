@@ -12,7 +12,10 @@ export interface SlotView extends Slot {
   daypart: string;
 }
 
-export function slotViews(plan: Plan, slots: Slot[]): SlotView[] {
+/** Anything with show names: a Plan or a stored PlanSnapshot. */
+type Named = { shows: Array<{ id: string; name: string }> };
+
+export function slotViews(plan: Named, slots: Slot[]): SlotView[] {
   const names = new Map(plan.shows.map((s) => [s.id, s.name]));
   return slots.map((slot) => ({
     ...slot,
@@ -65,7 +68,7 @@ export function planView(id: string, plan: Plan, trace: TraceEntry[]) {
   };
 }
 
-export function scoreView(plan: Plan, annotated: Annotated) {
+export function scoreView(plan: Named, annotated: Annotated) {
   const names = new Map(plan.shows.map((s) => [s.id, s.name]));
   // Violations name show IDs; swap in titles for display.
   const violations = annotated.violations.map((v) => v.replace(/^\S+/, (id) => names.get(id) ?? id));

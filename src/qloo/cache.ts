@@ -1,61 +1,37 @@
 // Bounded in-memory cache in front of Qloo, so reloading a preset doesn't spend quota again.
-// Only successful answers are cached; failures are retried on the next request. With a file path the
-// cache survives restarts and redeploys, which matters on a 10,000-calls-a-month key.
-
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+// Only successful answers are cached; failures are retried on the next request. With a store the cache
+// survives restarts and redeploys, which matters on a 10,000-calls-a-month key. Runtime-neutral: the file
+// store (Node) and the SQLite store (Cloudflare Durable Object) live in their own modules.
 
 import type { Demographics, DescribeHint, Entity, Envelope, QlooClient, Recommendation } from "./types.js";
 
-interface Entry {
+export interface CacheEntry {
   value: Envelope<unknown>;
   expires: number;
 }
 
+/** Where cache entries persist. Calls are synchronous; a store may batch writes itself. */
+export interface CacheStore {
+  load(): Array<[string, CacheEntry]>;
+  set(key: string, entry: CacheEntry): void;
+  delete(key: string): void;
+  flush?(): void;
+}
+
 export class CachingClient implements QlooClient {
-  private readonly entries = new Map<string, Entry>();
+  private readonly entries = new Map<string, CacheEntry>();
 
   constructor(
     private readonly inner: QlooClient,
     private readonly maxEntries = 2000,
     private readonly ttlMs = 7 * 24 * 60 * 60 * 1000,
-    private readonly persistPath?: string,
+    private readonly store?: CacheStore,
   ) {
-    if (persistPath) this.load(persistPath);
-  }
-
-  private saveTimer: NodeJS.Timeout | undefined;
-
-  private load(path: string): void {
-    let saved: Array<[string, Entry]>;
-    try {
-      saved = JSON.parse(readFileSync(path, "utf8")) as Array<[string, Entry]>;
-    } catch {
-      return; // No cache yet, or unreadable: start empty.
-    }
+    if (!store) return;
     const now = Date.now();
-    for (const [key, entry] of saved.slice(-this.maxEntries)) if (entry.expires > now) this.entries.set(key, entry);
-  }
-
-  /** Writes at most once a second; a crash loses at most that second's answers. */
-  private scheduleSave(): void {
-    if (!this.persistPath || this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = undefined;
-      this.flush();
-    }, 1000);
-    this.saveTimer.unref();
-  }
-
-  flush(): void {
-    if (!this.persistPath) return;
-    try {
-      mkdirSync(dirname(this.persistPath), { recursive: true });
-      const tmp = `${this.persistPath}.tmp`;
-      writeFileSync(tmp, JSON.stringify([...this.entries]));
-      renameSync(tmp, this.persistPath);
-    } catch (err) {
-      console.error("Qloo cache not saved:", err instanceof Error ? err.message : err);
+    for (const [key, entry] of store.load()) {
+      if (entry.expires > now && this.entries.size < this.maxEntries) this.entries.set(key, entry);
+      else store.delete(key);
     }
   }
 
@@ -67,6 +43,11 @@ export class CachingClient implements QlooClient {
     return this.entries.size;
   }
 
+  /** Writes out anything the store is still batching (call on shutdown). */
+  flush(): void {
+    this.store?.flush?.();
+  }
+
   private async cached<T>(key: string, call: () => Promise<Envelope<T>>): Promise<Envelope<T>> {
     const hit = this.entries.get(key);
     if (hit && hit.expires > Date.now()) {
@@ -76,15 +57,20 @@ export class CachingClient implements QlooClient {
       return { ...(hit.value as Envelope<T>), cached: true };
     }
     const value = await call();
-    if (value.status === "ok" || value.status === "empty") this.store(key, value);
+    if (value.status === "ok" || value.status === "empty") this.put(key, value);
     return value;
   }
 
-  private store(key: string, value: Envelope<unknown>): void {
+  private put(key: string, value: Envelope<unknown>): void {
+    const entry = { value, expires: Date.now() + this.ttlMs };
     this.entries.delete(key);
-    this.entries.set(key, { value, expires: Date.now() + this.ttlMs });
-    while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!);
-    this.scheduleSave();
+    this.entries.set(key, entry);
+    this.store?.set(key, entry);
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value!;
+      this.entries.delete(oldest);
+      this.store?.delete(oldest);
+    }
   }
 
   describe(name: string, type: Entity["type"], hint?: DescribeHint): Promise<Envelope<Entity>> {
@@ -120,7 +106,7 @@ export class CachingClient implements QlooClient {
     for (const t of missing) {
       // A target Qloo didn't score is cached as an empty answer, so it isn't asked again either.
       const r = byId.get(t.id);
-      this.store(pairKey(t), r ? { status: "ok", data: [r] } : { status: "empty", data: [] });
+      this.put(pairKey(t), r ? { status: "ok", data: [r] } : { status: "empty", data: [] });
     }
     const data = [...known, ...(fresh.data ?? [])];
     return { status: data.length ? "ok" : "empty", data };

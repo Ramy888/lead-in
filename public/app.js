@@ -146,7 +146,9 @@ function renderNeedsInput() {
       h("div", {},
         u.candidates?.length
           ? [h("strong", {}, `Which “${u.name}”?`), " Qloo found more than one match. Pick one and the channel is re-planned."]
-          : [h("strong", {}, `“${u.name}” not found.`), " Qloo has no TV show by that name; it was left out."],
+          : u.status === "error"
+            ? [h("strong", {}, `“${u.name}” couldn't be looked up.`), " Qloo didn't answer in time, so it was left out. Plan again to retry."]
+            : [h("strong", {}, `“${u.name}” not found.`), " Qloo has no TV show by that name; it was left out."],
         h("div", { class: "choices" },
           ...(u.candidates ?? []).map((c) =>
             h("button", {

@@ -59,12 +59,29 @@ npm install
 npm test            # unit tests (solver checked against brute force)
 npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in ../.env, synthetic otherwise
 npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
-npm run dev         # API + UI on :8080
-docker build -t lead-in . && docker run -p 8080:8080 -e QLOO_API_KEY -v lead-in-data:/data lead-in
+npm run dev         # API + UI on :8080 (Node)
+npm run cf:dev      # the same app on the Cloudflare runtime (needs .dev.vars, below)
 ```
 
-Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN`,
-`QLOO_CACHE_FILE`, `PORT`, `TRUST_PROXY=1` behind Fly/Render.
+## Deploy (Cloudflare Workers)
+
+The live demo runs on Cloudflare: static assets serve the UI, and `/api/*` goes to one Durable Object
+(`src/worker/coordinator.ts`). One instance is deliberate: the Qloo key's limits are global, so the
+throttle, the quota reserve, the Qloo cache and saved plans live in one place. The cache and plans are
+in the object's SQLite, so they survive eviction and redeploys. Rate limits key on `cf-connecting-ip`.
+
+```bash
+npx wrangler login
+npx wrangler secret put QLOO_API_KEY            # prompts for the value
+npx wrangler secret put TMDB_READ_ACCESS_TOKEN
+npm run cf:deploy                                # typecheck + tests + wrangler deploy
+```
+
+For `npm run cf:dev`, put the same two keys in `.dev.vars` (gitignored). A `Dockerfile` is kept for
+container hosts (mount a volume at `/data` for the cache).
+
+Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN`;
+for Node also `QLOO_CACHE_FILE`, `PORT`, `TRUST_PROXY=1` behind a proxy.
 
 ## Data and privacy
 

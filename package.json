@@ -10,15 +10,23 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json",
     "demo": "tsc -p tsconfig.json && node --env-file-if-exists=../.env dist/cli/demo.js",
     "tmdb:smoke": "tsc -p tsconfig.json && node --env-file=../.env dist/cli/tmdb-smoke.js",
     "start": "node dist/server/main.js",
-    "dev": "tsc -p tsconfig.json && node --env-file-if-exists=../.env dist/server/main.js"
+    "dev": "tsc -p tsconfig.json && node --env-file-if-exists=../.env dist/server/main.js",
+    "cf:types": "wrangler types src/worker/worker-configuration.d.ts",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "npm run typecheck && npm test && wrangler deploy"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "wrangler": "^4.150.0"
+  },
+  "allowScripts": {
+    "workerd@1.20261006.1": true,
+    "esbuild@0.28.2": true
   }
 }

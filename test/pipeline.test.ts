@@ -52,4 +52,15 @@ describe("planDay with a library longer than a day", () => {
     expect(plan.schedule.slots.reduce((n, s) => n + s.units, 0)).toBe(48);
     expect(plan.notAired).toHaveLength(1);
   });
+
+  it("says Qloo is unreachable when every lookup failed, not that the library is too small", async () => {
+    const fake = new FakeQlooClient();
+    const down = {
+      describe: async () => ({ status: "error" as const, error: { code: "network", message: "down" } }),
+      recommend: fake.recommend.bind(fake),
+      audienceDemographics: fake.audienceDemographics.bind(fake),
+      affinities: fake.affinities.bind(fake),
+    };
+    await expect(planDay(down, LIBRARY)).rejects.toThrow(/Qloo couldn't be reached/);
+  });
 });
