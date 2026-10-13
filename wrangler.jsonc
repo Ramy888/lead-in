@@ -1,6 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "lead-in",
+  // Ramy.comm@gmail.com's Account (Workers Paid). Pinned so a deploy never picks another logged-in account.
+  "account_id": "49a2335350fcd5f21a1da7f542176da5",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-13",
   "compatibility_flags": ["nodejs_compat"],
