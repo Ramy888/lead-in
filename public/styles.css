@@ -81,8 +81,6 @@ button, input { font: inherit; color: inherit; }
 .add-show input { min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
 .add-show input#new-name { flex: 1; }
 .add-show input#new-runtime { width: 64px; }
-.matrix-mode { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 10px; margin: 0 0 14px; display: grid; gap: 4px; font-size: 14px; }
-.matrix-mode legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
 .primary { width: 100%; padding: 12px; border-radius: 10px; border: 0; background: linear-gradient(135deg, #5fb6ff, #7a7dff); color: #08101e; font-weight: 700; cursor: pointer; }
 .primary:disabled { opacity: 0.6; cursor: progress; }
 .ghost { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }

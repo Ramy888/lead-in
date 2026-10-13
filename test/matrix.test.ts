@@ -1,64 +1,73 @@
 import { describe, expect, it } from "vitest";
 import { FakeQlooClient } from "../src/qloo/fake.js";
 import type { Entity, Envelope, QlooClient, Recommendation } from "../src/qloo/types.js";
-import { fromCompare, fromRecommend } from "../src/matrix/overlap.js";
+import { fromAffinities, handoffScore } from "../src/matrix/overlap.js";
 
 const show = (id: string): Entity => ({ id, name: id, type: "tv_show" });
 const A = show("A"), B = show("B"), C = show("C");
 
-/** Client whose recommend lists are scripted per signal, to pin down the matrix maths. */
-function scripted(lists: Record<string, Array<[string, number]>>, status: Envelope<unknown>["status"] = "ok"): QlooClient {
+/** Client whose affinity rows are scripted per signal, to pin down the matrix maths. */
+function scripted(rows: Record<string, Array<[string, number]>>, status: Envelope<unknown>["status"] = "ok"): QlooClient {
   const fake = new FakeQlooClient();
   return {
     describe: fake.describe.bind(fake),
     audienceDemographics: fake.audienceDemographics.bind(fake),
-    compareAudiences: async () => ({ status: "ok", data: { overlap: 0.5 } }),
-    recommend: async (signals): Promise<Envelope<Recommendation[]>> => ({
+    recommend: fake.recommend.bind(fake),
+    affinities: async (from): Promise<Envelope<Recommendation[]>> => ({
       status,
-      data: (lists[signals[0]!.id] ?? []).map(([id, affinity]) => ({ entity: show(id), affinity })),
+      data: (rows[from.id] ?? []).map(([id, affinity]) => ({ entity: show(id), affinity })),
     }),
   };
 }
 
-describe("fromRecommend", () => {
-  it("is directional: A→B comes from A's list, B→A from B's", async () => {
-    const m = await fromRecommend(scripted({ A: [["B", 0.9]], B: [["A", 0.2]] }), [A, B]);
-    expect(m.get("A", "B")).toMatchObject({ score: 0.9, provenance: "recommend" });
-    expect(m.get("B", "A")).toMatchObject({ score: 0.2, provenance: "recommend" });
-  });
-
-  it("scores a pair missing from the list as 0 but keeps provenance", async () => {
-    const m = await fromRecommend(scripted({ A: [["B", 0.9]] }), [A, B, C]);
-    expect(m.get("A", "C")).toMatchObject({ score: 0, provenance: "recommend" });
-  });
-
-  it("records failed lookups instead of silently scoring them 0", async () => {
-    const m = await fromRecommend(scripted({}, "error"), [A, B]);
-    expect(m.get("A", "B")).toBeUndefined();
-    expect(m.failures).toEqual([{ from: "A", status: "error" }, { from: "B", status: "error" }]);
+describe("handoffScore", () => {
+  it("stretches Qloo's compressed band to 0..1 and clamps outside it", () => {
+    expect(handoffScore(0.975)).toBe(1);
+    expect(handoffScore(0.86)).toBe(0);
+    expect(handoffScore(0.76)).toBe(0);
+    expect(handoffScore(0.99)).toBe(1);
+    // Day-1 numbers: Columbo→Murder, She Wrote is a strong handoff, Columbo→Baywatch a weak one (< 0.35).
+    expect(handoffScore(0.9735)).toBeGreaterThan(0.95);
+    expect(handoffScore(0.896)).toBeLessThan(0.35);
   });
 });
 
-describe("fromCompare", () => {
-  it("fills both directions from one symmetric score", async () => {
-    const fake = new FakeQlooClient();
-    const ids = await Promise.all(["Columbo", "Murder, She Wrote", "Baywatch"].map((n) => fake.describe(n, "tv_show")));
-    const [col, msw, bay] = ids.map((e) => e.data!);
-    const m = await fromCompare(fake, [col!, msw!, bay!]);
-    expect(m.get(col!.id, msw!.id)!.score).toBe(m.get(msw!.id, col!.id)!.score);
-    // Fake data must never be labelled as Qloo's.
-    expect(m.get(col!.id, msw!.id)!.provenance).toBe("synthetic");
-    // The synthetic data must keep the day-1 intuition: a close pair beats a far pair.
-    expect(m.get(col!.id, msw!.id)!.score).toBeGreaterThan(m.get(col!.id, bay!.id)!.score);
+describe("fromAffinities", () => {
+  it("is directional and keeps the raw Qloo affinity beside our score", async () => {
+    const m = await fromAffinities(scripted({ A: [["B", 0.95]], B: [["A", 0.85]] }), [A, B]);
+    expect(m.get("A", "B")).toEqual({ score: handoffScore(0.95), raw: 0.95, provenance: "qloo" });
+    expect(m.get("B", "A")).toEqual({ score: handoffScore(0.85), raw: 0.85, provenance: "qloo" });
   });
 
-  it("labels edges from a real client as compare", async () => {
-    const m = await fromCompare(scripted({}), [A, B]);
-    expect(m.get("A", "B")).toMatchObject({ score: 0.5, provenance: "compare" });
-  });
-
-  it("never stores a self edge", async () => {
-    const m = await fromCompare(scripted({}), [A, B]);
+  it("never asks Qloo about a show's affinity for itself", async () => {
+    const asked: string[][] = [];
+    const c = scripted({});
+    const inner = c.affinities;
+    c.affinities = (from, targets) => (asked.push(targets.map((t) => t.id)), inner(from, targets));
+    const m = await fromAffinities(c, [A, B, C]);
+    expect(asked).toEqual([["B", "C"], ["A", "C"], ["A", "B"]]);
     expect(m.get("A", "A")).toBeUndefined();
+  });
+
+  it("records a target Qloo didn't score as a failure, not a zero", async () => {
+    const m = await fromAffinities(scripted({ A: [["B", 0.9]] }), [A, B, C]);
+    expect(m.get("A", "C")).toBeUndefined();
+    expect(m.failures).toContainEqual({ from: "A", to: "C", status: "empty" });
+  });
+
+  it("records failed lookups", async () => {
+    const m = await fromAffinities(scripted({}, "error"), [A, B]);
+    expect(m.get("A", "B")).toBeUndefined();
+    expect(m.failures).toEqual([{ from: "A", status: "error" }, { from: "B", status: "error" }]);
+  });
+
+  it("labels synthetic data and keeps the day-1 intuition", async () => {
+    const fake = new FakeQlooClient();
+    const [col, msw, bay] = (await Promise.all(["Columbo", "Murder, She Wrote", "Baywatch"].map((n) => fake.describe(n, "tv_show")))).map(
+      (e) => e.data!,
+    );
+    const m = await fromAffinities(fake, [col!, msw!, bay!]);
+    expect(m.get(col!.id, msw!.id)!.provenance).toBe("synthetic");
+    expect(m.get(col!.id, msw!.id)!.score).toBeGreaterThan(m.get(col!.id, bay!.id)!.score);
   });
 });

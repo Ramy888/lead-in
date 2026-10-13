@@ -19,7 +19,7 @@ describe("unitsFor", () => {
 
 describe("planDay", () => {
   it("airs every resolved show and reports ambiguous names with candidates", async () => {
-    const plan = await planDay(new FakeQlooClient(), LIBRARY, { matrix: "compare" });
+    const plan = await planDay(new FakeQlooClient(), LIBRARY);
     const aired = new Set(plan.schedule.slots.map((s) => s.showId));
     expect(plan.shows.every((s) => aired.has(s.id))).toBe(true);
     expect(plan.unresolved).toMatchObject([{ name: "Law", status: "needs_input" }]);
@@ -28,7 +28,7 @@ describe("planDay", () => {
   });
 
   it("suggests only titles outside the library for weak dayparts", async () => {
-    const plan = await planDay(new FakeQlooClient(), LIBRARY, { matrix: "recommend", gapThreshold: 1.01 });
+    const plan = await planDay(new FakeQlooClient(), LIBRARY, { gapThreshold: 1.01 });
     expect(plan.gaps.length).toBeGreaterThan(0);
     expect(plan.license.length).toBeGreaterThan(0);
     const library = new Set(plan.shows.map((s) => s.id));
@@ -41,7 +41,7 @@ describe("planDay with a library longer than a day", () => {
     // Seven 4-hour blocks (8 units each) = 56 units of library for a 48-unit day.
     const names = ["Columbo", "Matlock", "Knight Rider", "Baywatch", "Perry Mason", "The A-Team", "Magnum, P.I."];
     const library = names.map((name) => ({ name, runtimeMinutes: 200 }));
-    const plan = await planDay(new FakeQlooClient(), library, { matrix: "recommend", maxAirings: 1, maxStack: 1 });
+    const plan = await planDay(new FakeQlooClient(), library, { maxAirings: 1, maxStack: 1 });
     expect(plan.schedule.slots.reduce((n, s) => n + s.units, 0)).toBe(48);
     expect(plan.notAired).toHaveLength(1);
   });

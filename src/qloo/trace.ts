@@ -1,7 +1,7 @@
 // Records every Qloo call (tool, params, status, timing, result count) for the request-to-result
 // walkthrough the submission requires. Params are redacted so a trace can be shown or exported safely.
 
-import type { CompareResult, Demographics, Entity, Envelope, QlooClient, QlooTool, Recommendation } from "./types.js";
+import type { Demographics, DescribeHint, Entity, Envelope, QlooClient, QlooTool, Recommendation } from "./types.js";
 
 export interface TraceEntry {
   tool: QlooTool;
@@ -15,9 +15,21 @@ export interface TraceEntry {
 
 const SECRET_KEY_NAME = /key|token|secret|authorization|password/i;
 const TOKEN_LIKE = /[A-Za-z0-9_\-]{32,}/g;
+// Qloo entity IDs are UUIDs: long, but public and needed in the walkthrough.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SECRET_ENV = ["QLOO_API_KEY", "TMDB_READ_ACCESS_TOKEN", "TMDB_API_KEY", "ANTHROPIC_API_KEY"];
+
+function maskSecrets(text: string): string {
+  // The configured secrets are masked by value too, whatever their shape (a key could look like a UUID).
+  for (const name of SECRET_ENV) {
+    const secret = process.env[name];
+    if (secret && secret.length >= 8) text = text.split(secret).join("[redacted]");
+  }
+  return text.replace(TOKEN_LIKE, (m) => (UUID.test(m) ? m : "[redacted]"));
+}
 
 export function redact(value: unknown): unknown {
-  if (typeof value === "string") return value.replace(TOKEN_LIKE, "[redacted]");
+  if (typeof value === "string") return maskSecrets(value);
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -70,8 +82,8 @@ export class TracingClient implements QlooClient {
     return env;
   }
 
-  describe(name: string, type: Entity["type"]): Promise<Envelope<Entity>> {
-    return this.record("qloo_describe", { name, type }, () => this.inner.describe(name, type));
+  describe(name: string, type: Entity["type"], hint?: DescribeHint): Promise<Envelope<Entity>> {
+    return this.record("qloo_describe", { name, type, ...hint }, () => this.inner.describe(name, type, hint));
   }
 
   recommend(signals: Entity[], targetType: Entity["type"], limit: number): Promise<Envelope<Recommendation[]>> {
@@ -83,8 +95,8 @@ export class TracingClient implements QlooClient {
     return this.record("qloo_audience_demographics", { entity: entity.id }, () => this.inner.audienceDemographics(entity));
   }
 
-  compareAudiences(a: Entity[], b: Entity[]): Promise<Envelope<CompareResult>> {
-    const params = { groupA: a.map((e) => e.id), groupB: b.map((e) => e.id) };
-    return this.record("qloo_compare_audiences", params, () => this.inner.compareAudiences(a, b));
+  affinities(from: Entity, targets: Entity[]): Promise<Envelope<Recommendation[]>> {
+    const params = { from: from.id, targets: targets.map((t) => t.id) };
+    return this.record("qloo_rank", params, () => this.inner.affinities(from, targets));
   }
 }

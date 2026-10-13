@@ -1,7 +1,7 @@
 // End-to-end: show names + runtimes in, a 24h schedule with weak handoffs, weak dayparts and titles to
 // license out. Used by the CLI demo now and the HTTP API later. The Qloo client decides data provenance.
 
-import { fromCompare, fromRecommend, type OverlapMatrix } from "./matrix/overlap.js";
+import { fromAffinities, type OverlapMatrix } from "./matrix/overlap.js";
 import type { Candidate, Demographics, Entity, QlooClient } from "./qloo/types.js";
 import { DAYPARTS, DEFAULT_CLOCK, demographicFit, fitFunction, weakDayparts, type DaypartGap } from "./solver/dayparts.js";
 import { solve, type SolveResult, type SolverInput, type SolverShow } from "./solver/solve.js";
@@ -9,10 +9,13 @@ import { solve, type SolveResult, type SolverInput, type SolverShow } from "./so
 export interface LibraryItem {
   name: string;
   runtimeMinutes: number;
+  /** Premiere year, to pick between same-named shows (Matlock 1986 vs 2024). */
+  year?: number;
+  /** Qloo ID chosen in the "which one?" picker; skips name matching. */
+  qlooId?: string;
 }
 
 export interface PlanOptions {
-  matrix: "compare" | "recommend";
   maxAirings?: number;
   /** Every licensed show airs at least this often. Default 1. */
   minAirings?: number;
@@ -51,15 +54,24 @@ export interface Plan {
   license: LicenseSuggestion[];
 }
 
+const LICENSE_CANDIDATES = 10;
+
 export function unitsFor(runtimeMinutes: number, adLoad = 0.12): number {
   return Math.max(1, Math.ceil((runtimeMinutes * (1 + adLoad)) / 30));
 }
 
-export async function planDay(client: QlooClient, library: LibraryItem[], opts: PlanOptions): Promise<Plan> {
+export async function planDay(client: QlooClient, library: LibraryItem[], opts: PlanOptions = {}): Promise<Plan> {
   const shows: Plan["shows"] = [];
   const unresolved: Plan["unresolved"] = [];
-  for (const item of library) {
-    const res = await client.describe(item.name, "tv_show");
+  // Lookups run concurrently; the Qloo client spaces them to stay under the rate limit.
+  const described = await Promise.all(
+    library.map((item) => {
+      const hint = { ...(item.qlooId ? { id: item.qlooId } : {}), ...(item.year ? { year: item.year } : {}) };
+      return client.describe(item.name, "tv_show", hint);
+    }),
+  );
+  for (const [i, item] of library.entries()) {
+    const res = described[i]!;
     if (res.status === "ok" && res.data) {
       shows.push({ ...res.data, runtimeMinutes: item.runtimeMinutes, units: unitsFor(item.runtimeMinutes, opts.adLoad) });
     } else {
@@ -68,12 +80,10 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
   }
 
   const demographics = new Map<string, Demographics | undefined>();
-  for (const show of shows) {
-    const res = await client.audienceDemographics(show);
-    demographics.set(show.id, res.status === "ok" ? res.data : undefined);
-  }
+  const demoResults = await Promise.all(shows.map((show) => client.audienceDemographics(show)));
+  shows.forEach((show, i) => demographics.set(show.id, demoResults[i]!.status === "ok" ? demoResults[i]!.data : undefined));
 
-  const matrix = opts.matrix === "compare" ? await fromCompare(client, shows) : await fromRecommend(client, shows);
+  const matrix = await fromAffinities(client, shows);
   const solverShows: SolverShow[] = shows.map((s) => ({ id: s.id, units: s.units }));
   const dayUnits = (24 * 60) / DEFAULT_CLOCK.unitMinutes;
   // Small libraries must repeat more to fill the day; one airing of everything is the floor.
@@ -100,14 +110,17 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
   if (gaps.length && shows.length) {
     const libraryIds = new Set(shows.map((s) => s.id));
     const recs = await client.recommend(shows, "tv_show", 30);
-    const candidates = (recs.data ?? []).filter((r) => !libraryIds.has(r.entity.id));
+    // Only the closest few get a demographics lookup: each one is a Qloo call against a monthly quota.
+    const candidates = (recs.data ?? []).filter((r) => !libraryIds.has(r.entity.id)).slice(0, LICENSE_CANDIDATES);
+    const candidateDemo = await Promise.all(candidates.map((c) => client.audienceDemographics(c.entity)));
     for (const gap of gaps) {
       const profile = DAYPARTS.find((d) => d.name === gap.daypart)!.profile;
-      const scored = [];
-      for (const c of candidates) {
-        const demo = await client.audienceDemographics(c.entity);
-        scored.push({ daypart: gap.daypart, title: c.entity, affinity: c.affinity, fit: demographicFit(demo.data, profile) });
-      }
+      const scored = candidates.map((c, i) => ({
+        daypart: gap.daypart,
+        title: c.entity,
+        affinity: c.affinity,
+        fit: demographicFit(candidateDemo[i]!.data, profile),
+      }));
       scored.sort((a, b) => b.fit * b.affinity - a.fit * a.affinity);
       license.push(...scored.slice(0, 3));
     }

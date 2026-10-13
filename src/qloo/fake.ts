@@ -4,8 +4,8 @@
 
 import type {
   AgeBand,
-  CompareResult,
   Demographics,
+  DescribeHint,
   Entity,
   Envelope,
   QlooClient,
@@ -76,8 +76,10 @@ function blend(group: Entity[]): Features | undefined {
 export class FakeQlooClient implements QlooClient {
   readonly synthetic = true;
 
-  async describe(name: string, type: Entity["type"]): Promise<Envelope<Entity>> {
+  async describe(name: string, type: Entity["type"], hint?: DescribeHint): Promise<Envelope<Entity>> {
     if (type !== "tv_show") return { status: "empty" };
+    const picked = hint?.id ? CATALOG.find((s) => idOf(s.name) === hint.id) : undefined;
+    if (picked) return { status: "ok", data: toEntity(picked) };
     const q = name.trim().toLowerCase();
     const exact = CATALOG.find((s) => s.name.toLowerCase() === q);
     if (exact) return { status: "ok", data: toEntity(exact) };
@@ -118,9 +120,16 @@ export class FakeQlooClient implements QlooClient {
     return { status: "ok", data: { age, gender: { female: round(femaleLean), male: round(-femaleLean) } } };
   }
 
-  async compareAudiences(a: Entity[], b: Entity[]): Promise<Envelope<CompareResult>> {
-    const fa = blend(a), fb = blend(b);
-    if (!fa || !fb) return { status: "empty" };
-    return { status: "ok", data: { overlap: round(contrast(cosine(fa, fb))) } };
+  async affinities(from: Entity, targets: Entity[]): Promise<Envelope<Recommendation[]>> {
+    const taste = find(from)?.f;
+    if (!taste) return { status: "empty", data: [] };
+    // Same compressed range real Qloo affinities fall in (≈0.76 unrelated … 0.975 same niche, day-1
+    // measurement), with a popularity lift so the matrix stays one-way like the real thing.
+    const recs = targets.flatMap((t) => {
+      const s = find(t);
+      if (!s || idOf(s.name) === from.id) return [];
+      return [{ entity: toEntity(s), affinity: round(0.76 + 0.215 * contrast(cosine(taste, s.f)) * (0.85 + 0.15 * s.popularity)) }];
+    });
+    return { status: recs.length ? "ok" : "empty", data: recs };
   }
 }

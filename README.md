@@ -3,18 +3,23 @@
 An audience-flow programming agent for FAST channels (Pluto TV, Tubi, Samsung TV Plus, Roku Channel).
 Give it a show library and it builds a 24-hour schedule where each show hands its audience to the next.
 It also flags weak handoffs and suggests titles to license for dayparts the library serves poorly.
-The taste signals come from [Qloo](https://www.qloo.com/): pairwise audience overlap, audience demographics and affinity recommendations.
+The taste signals come from [Qloo](https://www.qloo.com/): show-to-show audience affinity, audience demographics and recommendations.
 
-> **Status:** early build. The Qloo layer currently runs on a **synthetic** stand-in (`src/qloo/fake.ts`)
-> until the hackathon API key arrives. Every number it produces is invented and labelled as such.
+> **Status:** working build on live Qloo data (`src/qloo/rest.ts`). Without `QLOO_API_KEY` it falls back to a
+> **synthetic** stand-in (`src/qloo/fake.ts`) whose numbers are invented, and the UI says so.
 
 ## How it works
 
-1. **Resolve** each title to a Qloo entity. Ambiguous names come back as `needs_input` with candidates; the tool never guesses.
+1. **Resolve** each title to a Qloo entity (`/search`). Only an exact title match (ignoring case and punctuation) is
+   accepted; a premiere year picks between same-named shows (Matlock 1986 vs 2024). Anything else comes back as
+   `needs_input` with candidates, and the picked candidate's ID is sent back. The tool never guesses.
 2. **Audience skew** per show (Qloo `audience_demographics`) → daypart fit. The daypart audience profiles
    in `src/solver/dayparts.ts` are our own interpretation, not Qloo data.
-3. **Overlap matrix**, directional (A→B ≠ B→A). It's built from `compare_audiences` (symmetric) or from
-   `recommend` affinities (asymmetric). Every edge records which one it came from.
+3. **Overlap matrix**, directional (A→B ≠ B→A): one `/v2/insights` call per show, with that show as the signal and
+   the results restricted to the library (`filter.results.entities`), so N shows cost N calls. Qloo's affinities sit
+   in a narrow band (≈0.76 unrelated … 0.975 same niche), so Lead-In maps 0.86 → 0 and 0.975 → 1 as its handoff score
+   (our interpretation; the raw affinity is kept and shown). Qloo's `compare` endpoint was tested on day 1: it returns
+   shared content tags, not an audience number, so it isn't used for the matrix.
 4. **Solve** the day: 48 half-hour units, runtimes from TMDB plus ad load. Shows may repeat within limits, every licensed
    show airs at least once, and the day wraps at midnight. The solver uses beam search, then local search with seeded kicks.
 5. **Gaps → licensing:** weak dayparts get title suggestions from Qloo `recommend`, ranked by fit for that daypart.
@@ -30,13 +35,19 @@ The side panel has weak dayparts with titles to license, the overlap heatmap, an
 | Route | What it does |
 |---|---|
 | `GET /api/presets` | Demo libraries |
-| `POST /api/plans` | `{library:[{name, runtimeMinutes?}], matrix?}` → NDJSON stream: one `trace` line per Qloo call, then the `plan` |
+| `POST /api/plans` | `{library:[{name, runtimeMinutes?, year?, qlooId?}]}` → NDJSON stream: one `trace` line per Qloo call, then the `plan` |
 | `POST /api/plans/:id/score` | `{sequence:[showId…]}` (a reorder of the plan) → re-scored slots and any rule violations |
 | `GET /api/health` | Liveness, plus whether data is synthetic |
 
 The API is public and unauthenticated so judges can use it directly. To make that safe, request bodies are capped at
-16 KB and libraries at 40 shows (16 for the pairwise matrix). Each client gets a planning rate limit, at most 3 plans run
-at once, each run is time-limited, and Qloo answers are cached (bounded LRU) so reloads spend no quota.
+16 KB and libraries at 40 shows. Each client gets a planning rate limit, at most 3 plans run at once, and each run is
+time-limited (a timed-out run stops calling Qloo).
+
+**Qloo quota.** The hackathon key allows 5 requests/second and 10,000/month. All calls share one throttle (4/s), 429s
+and 5xx are retried a bounded number of times (honouring `Retry-After`), and new calls stop when the month's remainder
+falls to a 500-call reserve. Answers are cached for 7 days, affinities per pair (adding a show costs only its new
+pairs), and the cache is written to `QLOO_CACHE_FILE` (default `data/qloo-cache.json`) so restarts spend nothing.
+An uncached 12-show plan is about 50 calls.
 Missing runtimes are looked up on TMDB when `TMDB_READ_ACCESS_TOKEN` is set.
 
 ## Run it
@@ -46,11 +57,14 @@ Requires Node ≥ 22.19.
 ```bash
 npm install
 npm test            # unit tests (solver checked against brute force)
-npm run demo        # 24h grid on the synthetic library (add -- --recommend for the recommend matrix)
+npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in ../.env, synthetic otherwise
 npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
 npm run dev         # API + UI on :8080
-docker build -t lead-in . && docker run -p 8080:8080 lead-in
+docker build -t lead-in . && docker run -p 8080:8080 -e QLOO_API_KEY -v lead-in-data:/data lead-in
 ```
+
+Environment: `QLOO_API_KEY` (server only, never sent to the browser), optional `TMDB_READ_ACCESS_TOKEN`,
+`QLOO_CACHE_FILE`, `PORT`, `TRUST_PROXY=1` behind Fly/Render.
 
 ## Data and privacy
 

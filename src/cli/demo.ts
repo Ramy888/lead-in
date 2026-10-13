@@ -1,36 +1,26 @@
-// Prints a 24h Lead-In schedule for a classic-crime FAST channel. Runs on SYNTHETIC Qloo data until the
-// hackathon key arrives; runtimes are TMDB values (Columbo/Murder, She Wrote/Baywatch verified live).
+// Prints a 24h Lead-In schedule for the classic-crime preset plus one ambiguous title. Uses real Qloo when
+// QLOO_API_KEY is set (npm run demo loads ../.env), the synthetic stand-in otherwise.
 
 import { planDay, type LibraryItem } from "../pipeline.js";
-import { FakeQlooClient } from "../qloo/fake.js";
+import { qlooFromEnv } from "../qloo/from-env.js";
+import { PRESETS } from "../presets.js";
 import { TracingClient } from "../qloo/trace.js";
 import { formatTime } from "../solver/dayparts.js";
 
 const LIBRARY: LibraryItem[] = [
-  { name: "Columbo", runtimeMinutes: 76 },
-  { name: "Murder, She Wrote", runtimeMinutes: 45 },
-  { name: "Matlock", runtimeMinutes: 48 },
-  { name: "Perry Mason", runtimeMinutes: 51 },
-  { name: "Diagnosis: Murder", runtimeMinutes: 45 },
-  { name: "Quincy, M.E.", runtimeMinutes: 50 },
-  { name: "The Rockford Files", runtimeMinutes: 50 },
-  { name: "Magnum, P.I.", runtimeMinutes: 48 },
-  { name: "Knight Rider", runtimeMinutes: 48 },
-  { name: "The A-Team", runtimeMinutes: 48 },
-  { name: "Walker, Texas Ranger", runtimeMinutes: 45 },
-  { name: "Baywatch", runtimeMinutes: 42 },
+  ...PRESETS[0]!.library,
   { name: "Law", runtimeMinutes: 45 }, // ambiguous on purpose: shows the needs_input path
 ];
 
-const mode = process.argv.includes("--recommend") ? "recommend" : "compare";
-const client = new TracingClient(new FakeQlooClient());
+const qloo = qlooFromEnv();
+const client = new TracingClient(qloo);
 const started = performance.now();
-const plan = await planDay(client, LIBRARY, { matrix: mode });
+const plan = await planDay(client, LIBRARY, {});
 const ms = Math.round(performance.now() - started);
 
 const name = new Map(plan.shows.map((s) => [s.id, s.name]));
 const source = plan.synthetic ? "SYNTHETIC stand-in data, not real Qloo affinities" : "Qloo data";
-console.log(`LEAD-IN — 24h grid (matrix: ${mode}; ${source}) — solved in ${ms} ms\n`);
+console.log(`LEAD-IN — 24h grid (${source}) — solved in ${ms} ms\n`);
 plan.schedule.slots.forEach((slot, i) => {
   const next = plan.schedule.slots[(i + 1) % plan.schedule.slots.length]!;
   const arrow = slot.showId === next.showId ? "  (stacked)" : `  → ${slot.handoffScore.toFixed(2)}${slot.weakHandoff ? "  WEAK HANDOFF" : ""}`;
@@ -42,5 +32,6 @@ for (const s of plan.license) console.log(`  license for ${s.daypart}: ${s.title
 for (const u of plan.unresolved) {
   console.log(`\nNeeds input: "${u.name}" (${u.status}) → ${(u.candidates ?? []).map((c) => c.name).join(" | ")}`);
 }
-console.log(`\nQloo calls: ${client.trace.length} (${[...new Set(client.trace.map((t) => t.tool))].join(", ")})`);
+qloo.flush();
+console.log(`\nQloo calls: ${client.trace.length}, ${client.trace.filter((t) => t.cached).length} from cache (${[...new Set(client.trace.map((t) => t.tool))].join(", ")})`);
 console.log("TV data from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.");

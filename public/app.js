@@ -84,8 +84,7 @@ async function planChannel() {
   const count = h("span", { class: "num" }, "0");
   $("#progress").replaceChildren(h("div", {}, "Asking Qloo… calls so far: ", count), ticker);
 
-  const matrix = document.querySelector('input[name="matrix"]:checked').value;
-  const body = { library: state.library, ...(matrix === "auto" ? {} : { matrix }) };
+  const body = { library: state.library };
   let calls = 0;
   try {
     const res = await fetch("/api/plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -131,7 +130,7 @@ function loadPlan(plan) {
   const badge = $("#source-badge");
   badge.hidden = false;
   badge.className = "badge " + (plan.synthetic ? "synthetic" : "live");
-  badge.textContent = plan.synthetic ? "Synthetic stand-in data · Qloo key pending" : "Live Qloo data";
+  badge.textContent = plan.synthetic ? "Synthetic stand-in data · no Qloo key configured" : "Live Qloo data";
   renderLibrary();
   renderNeedsInput();
   renderSchedule();
@@ -154,11 +153,12 @@ function renderNeedsInput() {
               class: "ghost",
               onclick: () => {
                 const item = state.library.find((s) => s.name.toLowerCase() === u.name.toLowerCase());
-                if (item) item.name = c.name;
+                // Send the picked ID: two shows can share a title (Matlock 1986 and 2024).
+                if (item) Object.assign(item, { name: c.name, qlooId: c.id });
                 renderLibrary();
                 planChannel();
               },
-            }, c.name),
+            }, c.hint ? `${c.name} (${c.hint})` : c.name),
           ),
         ),
       ),
@@ -331,13 +331,14 @@ function renderInsights() {
     heat.append(h("span", { class: "row-h", title: names.get(from) }, names.get(from)));
     ids.forEach((to, j) => {
       const v = p.matrix.scores[i][j];
+      const raw = p.matrix.raw?.[i]?.[j];
       const bg = v === null ? "transparent" : `color-mix(in srgb, var(--qloo) ${Math.round(v * 100)}%, #151b2a)`;
-      heat.append(h("span", { class: "cell", style: { background: bg }, title: v === null ? "" : `${names.get(from)} → ${names.get(to)}: ${fmt(v)}` }, v === null ? "" : Math.round(v * 100)));
+      heat.append(h("span", { class: "cell", style: { background: bg }, title: v === null ? "" : `${names.get(from)} → ${names.get(to)}: handoff ${fmt(v)} (Qloo affinity ${raw === null || raw === undefined ? "—" : raw.toFixed(3)})` }, v === null ? "" : Math.round(v * 100)));
     });
   });
   $("#tab-matrix").replaceChildren(
     h("p", {}, "How much of each row show's audience is likely to stay for each column show. Brighter means more overlap. ", sourceTag()),
-    h("p", { class: "empty", style: { fontSize: "12px" } }, `Built from Qloo ${p.matrix.provenance === "synthetic" ? "stand-in data" : p.matrix.provenance === "recommend" ? "recommendation affinities (one-way)" : "pairwise audience comparison"}.`),
+    h("p", { class: "empty", style: { fontSize: "12px" } }, p.matrix.provenance === "synthetic" ? "Built from synthetic stand-in data." : "Built from Qloo affinities (one-way: fans of the row show, scored on the column show), mapped from 0.86–0.975 to 0–1. Hover a cell for the raw value."),
     heat,
     ...(p.matrix.failures.length ? [h("p", { class: "notaired" }, `${p.matrix.failures.length} lookups failed and count as no overlap.`)] : []),
   );

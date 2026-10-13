@@ -11,6 +11,21 @@ describe("redact", () => {
     expect(text).not.toContain("short");
     expect(text).toContain("Columbo");
   });
+
+  it("keeps Qloo entity IDs (UUIDs) but still masks the configured key, whatever its shape", () => {
+    const id = "66969B47-66E0-42DD-8712-99EEA147F7F1";
+    const uuidShapedKey = "0f0f0f0f-1111-2222-3333-444455556666";
+    const before = process.env.QLOO_API_KEY;
+    process.env.QLOO_API_KEY = uuidShapedKey;
+    try {
+      const text = JSON.stringify(redact({ from: id, targets: [id], note: `sent ${uuidShapedKey}` }));
+      expect(text).toContain(id);
+      expect(text).not.toContain(uuidShapedKey);
+    } finally {
+      if (before === undefined) delete process.env.QLOO_API_KEY;
+      else process.env.QLOO_API_KEY = before;
+    }
+  });
 });
 
 describe("TracingClient", () => {

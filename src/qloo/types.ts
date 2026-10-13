@@ -35,6 +35,8 @@ export interface Envelope<T> {
 export interface Entity {
   id: string;
   name: string;
+  /** Premiere year, shown to tell same-named shows apart. */
+  year?: number;
   type: "tv_show" | "movie" | "artist" | "podcast" | "brand" | "place" | "person" | "book" | "destination" | "video_game";
 }
 
@@ -52,17 +54,20 @@ export interface Demographics {
 
 export type AgeBand = "24_and_younger" | "25_to_29" | "30_to_34" | "35_to_44" | "45_to_54" | "55_and_older";
 
-export interface CompareResult {
-  /** Audience overlap between the two groups, 0..1. Symmetric. */
-  overlap: number;
+/** Narrows an ambiguous title: a Qloo ID picked earlier, or the year the show premiered. */
+export interface DescribeHint {
+  id?: string;
+  year?: number;
 }
 
 /** The subset of tools Lead-In uses, typed. Real and fake clients both implement this. */
 export interface QlooClient {
   /** True when results are invented stand-ins, not Qloo data. Matrix edges and the UI carry this through. */
   readonly synthetic?: boolean;
-  describe(name: string, type: Entity["type"]): Promise<Envelope<Entity>>;
+  describe(name: string, type: Entity["type"], hint?: DescribeHint): Promise<Envelope<Entity>>;
   recommend(signals: Entity[], targetType: Entity["type"], limit: number): Promise<Envelope<Recommendation[]>>;
   audienceDemographics(entity: Entity): Promise<Envelope<Demographics>>;
-  compareAudiences(a: Entity[], b: Entity[]): Promise<Envelope<CompareResult>>;
+  /** Qloo affinity of each target for an audience that likes `from` (insights restricted to the targets).
+   *  One call per row of the overlap matrix. Targets Qloo has no score for are left out. */
+  affinities(from: Entity, targets: Entity[]): Promise<Envelope<Recommendation[]>>;
 }

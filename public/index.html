@@ -36,13 +36,6 @@
         <button type="submit" class="ghost">Add</button>
       </form>
 
-      <fieldset class="matrix-mode">
-        <legend>Audience-overlap source</legend>
-        <label><input type="radio" name="matrix" value="auto" checked> Auto</label>
-        <label><input type="radio" name="matrix" value="compare"> Pairwise compare</label>
-        <label><input type="radio" name="matrix" value="recommend"> Recommend affinity</label>
-      </fieldset>
-
       <button id="plan-btn" class="primary">Plan the 24h channel</button>
       <div id="progress" class="progress" aria-live="polite"></div>
       <div id="needs-input" class="needs-input" aria-live="polite"></div>
@@ -75,9 +68,9 @@
         <h3>What comes from where</h3>
         <dl class="legend">
           <dt><span class="tag qloo">Qloo says</span></dt>
-          <dd>Audience overlap between shows, each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
+          <dd>How strongly fans of one show also like another (Qloo affinity, shown raw in the matrix tooltips), each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
           <dt><span class="tag ours">Our read</span></dt>
-          <dd>Who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
+          <dd>The handoff score: Qloo's affinities sit in a narrow band (about 0.76 for unrelated shows to 0.97 for close neighbours), so Lead-In maps 0.86 and below to 0 and 0.975 to 1; a raw affinity under about 0.90 reads as a weak handoff. Also who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
           <dt><span class="tag tmdb">TMDB</span></dt>
           <dd>Episode runtimes, which set slot lengths (runtime plus about 12% ad load, rounded up to half hours).</dd>
         </dl>
@@ -85,7 +78,7 @@
         <ol class="steps">
           <li>Resolve each title to a Qloo entity. Ambiguous titles ask you to choose.</li>
           <li>Get each show's audience skew and score its fit for every daypart.</li>
-          <li>Build a one-way overlap matrix: how much of show A's audience stays for show B.</li>
+          <li>Build a one-way overlap matrix: for each show, ask Qloo how much its fans like every other show in the library (one call per show).</li>
           <li>Search for the 24h loop with the best total of handoffs plus daypart fit. Every show airs at least once (when the library fits), and runs of the same show are capped.</li>
           <li>Flag weak handoffs and dayparts the library serves poorly, then ask Qloo which titles would fill them.</li>
         </ol>

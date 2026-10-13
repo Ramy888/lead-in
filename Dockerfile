@@ -9,7 +9,10 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:22.19.0-slim
 WORKDIR /app
-ENV NODE_ENV=production PORT=8080 TRUST_PROXY=1
+# Qloo answers are cached on disk so restarts don't spend the monthly quota; mount a volume at /data to
+# keep them across deploys too.
+ENV NODE_ENV=production PORT=8080 TRUST_PROXY=1 QLOO_CACHE_FILE=/data/qloo-cache.json
+RUN mkdir -p /data && chown node:node /data
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

@@ -22,8 +22,6 @@ export interface AppOptions {
   /** Use the proxy's client-IP header for rate limiting (Fly/Render). Off when not behind a proxy. */
   trustProxy?: boolean;
   maxBodyBytes?: number;
-  /** Largest library for the pairwise compare matrix (N(N−1)/2 Qloo calls); above it, recommend is used. */
-  maxCompareShows?: number;
   maxShows?: number;
   maxConcurrentPlans?: number;
   planTimeoutMs?: number;
@@ -74,17 +72,15 @@ async function readJson(req: IncomingMessage, maxBytes: number): Promise<unknown
 }
 
 interface PlanRequest {
-  library: Array<{ name: string; runtimeMinutes?: number }>;
-  matrix?: "compare" | "recommend";
+  library: Array<{ name: string; runtimeMinutes?: number; year?: number; qlooId?: string }>;
 }
+
+const QLOO_ID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$|^SYN-[A-Z0-9-]{1,100}$/;
 
 function parsePlanRequest(body: unknown, maxShows: number): PlanRequest {
   const b = body as Partial<PlanRequest> | null;
   if (!b || !Array.isArray(b.library) || b.library.length === 0) throw new HttpError(400, "library must be a non-empty array");
   if (b.library.length > maxShows) throw new HttpError(400, `library is limited to ${maxShows} shows`);
-  if (b.matrix !== undefined && b.matrix !== "compare" && b.matrix !== "recommend") {
-    throw new HttpError(400, "matrix must be compare or recommend");
-  }
   const seen = new Set<string>();
   const library: PlanRequest["library"] = [];
   for (const item of b.library) {
@@ -94,17 +90,20 @@ function parsePlanRequest(body: unknown, maxShows: number): PlanRequest {
     if (rt !== undefined && (!Number.isInteger(rt) || rt < 5 || rt > 240)) {
       throw new HttpError(400, "runtimeMinutes must be a whole number from 5 to 240");
     }
-    if (seen.has(name.toLowerCase())) continue;
-    seen.add(name.toLowerCase());
-    library.push(rt === undefined ? { name } : { name, runtimeMinutes: rt });
+    const { year, qlooId } = item;
+    if (year !== undefined && (!Number.isInteger(year) || year < 1900 || year > 2100)) throw new HttpError(400, "year must be a whole number from 1900 to 2100");
+    if (qlooId !== undefined && (typeof qlooId !== "string" || !QLOO_ID.test(qlooId))) throw new HttpError(400, "qlooId must be a Qloo entity ID");
+    const key = qlooId ?? name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    library.push({ name, ...(rt === undefined ? {} : { runtimeMinutes: rt }), ...(year ? { year } : {}), ...(qlooId ? { qlooId } : {}) });
   }
-  return { library, ...(b.matrix ? { matrix: b.matrix } : {}) };
+  return { library };
 }
 
 export function createApp(opts: AppOptions): Server {
   const maxBody = opts.maxBodyBytes ?? 16_384;
   const maxShows = opts.maxShows ?? 40;
-  const maxCompare = opts.maxCompareShows ?? 16;
   const maxConcurrent = opts.maxConcurrentPlans ?? 3;
   const planTimeout = opts.planTimeoutMs ?? 120_000;
   const planLimiter = opts.planLimiter ?? new RateLimiter(5, 10);
@@ -126,8 +125,9 @@ export function createApp(opts: AppOptions): Server {
   async function withRuntimes(library: PlanRequest["library"]): Promise<LibraryItem[]> {
     const out: LibraryItem[] = [];
     for (const item of library) {
-      if (item.runtimeMinutes) {
-        out.push({ name: item.name, runtimeMinutes: item.runtimeMinutes });
+      const { runtimeMinutes, ...rest } = item;
+      if (runtimeMinutes) {
+        out.push({ ...rest, runtimeMinutes });
         continue;
       }
       const key = item.name.toLowerCase();
@@ -136,7 +136,7 @@ export function createApp(opts: AppOptions): Server {
         rt = (await opts.tmdb.importShow(item.name).catch(() => null))?.runtimeMinutes ?? 45;
         runtimes.set(key, rt);
       }
-      out.push({ name: item.name, runtimeMinutes: rt ?? 45 });
+      out.push({ ...rest, runtimeMinutes: rt ?? 45 });
     }
     return out;
   }
@@ -144,9 +144,6 @@ export function createApp(opts: AppOptions): Server {
   async function createPlan(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!planLimiter.take(clientKey(req))) throw new HttpError(429, "Too many plans; try again in a minute");
     const request = parsePlanRequest(await readJson(req, maxBody), maxShows);
-    if (request.matrix === "compare" && request.library.length > maxCompare) {
-      throw new HttpError(400, `compare is limited to ${maxCompare} shows; use recommend for larger libraries`);
-    }
     if (running >= maxConcurrent) throw new HttpError(503, "Busy planning other channels; try again shortly");
 
     running++;
@@ -159,14 +156,13 @@ export function createApp(opts: AppOptions): Server {
     let timer: NodeJS.Timeout | undefined;
     try {
       const library = await withRuntimes(request.library);
-      const matrix = request.matrix ?? (library.length <= maxCompare ? "compare" : "recommend");
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           client.cancel();
           reject(new Error("Planning took too long"));
         }, planTimeout);
       });
-      const plan = await Promise.race([planDay(client, library, { matrix }), timeout]);
+      const plan = await Promise.race([planDay(client, library), timeout]);
       const id = randomUUID();
       plans.set(id, plan);
       write({ type: "plan", plan: planView(id, plan, client.trace) });

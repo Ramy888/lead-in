@@ -69,10 +69,11 @@ describe("API", () => {
     expect(res.status).toBe(404);
   });
 
-  it("caps library size, compare size and body size", async () => {
-    const base = await start({ maxShows: 3, maxCompareShows: 2, maxBodyBytes: 2000 });
+  it("caps library size and body size, and validates year and Qloo ID", async () => {
+    const base = await start({ maxShows: 3, maxBodyBytes: 2000 });
     expect((await plan(base, { library: LIB })).res.status).toBe(400);
-    expect((await plan(base, { library: LIB.slice(0, 3), matrix: "compare" })).res.status).toBe(400);
+    expect((await plan(base, { library: [{ name: "Matlock", year: 86 }] })).res.status).toBe(400);
+    expect((await plan(base, { library: [{ name: "Matlock", qlooId: "../../etc" }] })).res.status).toBe(400);
     expect((await plan(base, { library: [{ name: "x".repeat(3000) }] })).res.status).toBe(413);
     expect((await plan(base, { library: [] })).res.status).toBe(400);
   });
@@ -97,22 +98,28 @@ describe("API", () => {
 describe("API resilience", () => {
   it("stops calling Qloo once a plan times out, and keeps serving", async () => {
     const fake = new FakeQlooClient();
-    let describes = 0;
+    let calls = 0;
+    // Every Qloo method takes 60 ms, so a 100 ms plan times out during the second phase of lookups.
+    const slowly = <A extends unknown[], R>(fn: (...a: A) => Promise<R>) => async (...a: A) => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 60));
+      return fn(...a);
+    };
     const slow = {
       synthetic: true,
-      describe: async (n: string, t: "tv_show") => { describes++; await new Promise((r) => setTimeout(r, 60)); return fake.describe(n, t); },
-      recommend: fake.recommend.bind(fake),
-      audienceDemographics: fake.audienceDemographics.bind(fake),
-      compareAudiences: fake.compareAudiences.bind(fake),
+      describe: slowly(fake.describe.bind(fake)),
+      recommend: slowly(fake.recommend.bind(fake)),
+      audienceDemographics: slowly(fake.audienceDemographics.bind(fake)),
+      affinities: slowly(fake.affinities.bind(fake)),
     };
     const base = await start({ qloo: slow, planTimeoutMs: 100 });
     const { lines } = await plan(base, { library: LIB });
     expect(lines.at(-1)).toMatchObject({ type: "error" });
-    const atTimeout = describes;
+    const atTimeout = calls;
     await new Promise((r) => setTimeout(r, 500));
-    // At most the call already in flight finishes; no new Qloo calls start after the timeout.
-    expect(describes).toBe(atTimeout);
-    expect(describes).toBeLessThan(LIB.length);
+    // Calls already in flight finish; no new Qloo calls start after the timeout (the affinity rows never run).
+    expect(calls).toBe(atTimeout);
+    expect(calls).toBeLessThanOrEqual(LIB.length * 2);
     expect((await fetch(`${base}/api/health`)).status).toBe(200);
   });
 });

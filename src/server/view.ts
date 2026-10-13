@@ -41,8 +41,10 @@ export function planView(id: string, plan: Plan, trace: TraceEntry[]) {
     matrix: {
       ids,
       provenance: plan.matrix.get(ids[0] ?? "", ids[1] ?? "")?.provenance ?? null,
-      // scores[i][j] = handoff from show i to show j; null where Qloo gave nothing.
+      // scores[i][j] = our handoff score from show i to show j; raw[i][j] = the Qloo affinity behind it.
+      // null where Qloo gave nothing.
       scores: ids.map((a) => ids.map((b) => (a === b ? null : plan.matrix.get(a, b)?.score ?? null))),
+      raw: ids.map((a) => ids.map((b) => (a === b ? null : plan.matrix.get(a, b)?.raw ?? null))),
       failures: plan.matrix.failures,
     },
     schedule: {
