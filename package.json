@@ -11,15 +11,15 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json",
-    "demo": "tsc -p tsconfig.json && node --env-file-if-exists=../.env dist/cli/demo.js",
-    "tmdb:smoke": "tsc -p tsconfig.json && node --env-file=../.env dist/cli/tmdb-smoke.js",
+    "demo": "tsc -p tsconfig.json && node --env-file-if-exists=../.env --env-file-if-exists=.env dist/cli/demo.js",
+    "tmdb:smoke": "tsc -p tsconfig.json && node --env-file-if-exists=../.env --env-file-if-exists=.env dist/cli/tmdb-smoke.js",
     "start": "node dist/server/main.js",
-    "dev": "tsc -p tsconfig.json && node --env-file-if-exists=../.env dist/server/main.js",
+    "dev": "tsc -p tsconfig.json && node --env-file-if-exists=../.env --env-file-if-exists=.env dist/server/main.js",
     "cf:types": "wrangler types src/worker/worker-configuration.d.ts",
     "cf:dev": "wrangler dev",
     "cf:deploy": "npm run typecheck && npm test && wrangler deploy",
-    "agent:smoke": "tsc -p tsconfig.json && node --env-file=../.env dist/cli/agent-smoke.js",
-    "bench": "tsc -p tsconfig.json && node --env-file=../.env dist/cli/bench.js"
+    "agent:smoke": "tsc -p tsconfig.json && node --env-file-if-exists=../.env --env-file-if-exists=.env dist/cli/agent-smoke.js",
+    "bench": "tsc -p tsconfig.json && node --env-file-if-exists=../.env --env-file-if-exists=.env dist/cli/bench.js"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

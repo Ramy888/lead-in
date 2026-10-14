@@ -104,9 +104,10 @@ Requires Node ≥ 22.19.
 
 ```bash
 npm install
+cp .env.example .env  # add QLOO_API_KEY (and optionally TMDB_READ_ACCESS_TOKEN, ANTHROPIC_API_KEY)
 npm test            # unit tests (solver checked against brute force)
-npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in ../.env, synthetic otherwise
-npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in ../.env
+npm run demo        # 24h grid for the crime preset; live Qloo if QLOO_API_KEY is in .env, synthetic otherwise
+npm run tmdb:smoke  # live TMDB runtime check; needs TMDB_READ_ACCESS_TOKEN in .env
 npm run agent:smoke # one live agent run (Claude + Qloo, a few cents); PRESET=1 for Classic TV Mix
 npm run bench       # Lead-In vs Claude alone vs listed vs shuffled on every preset (~$0.15)
 npm run dev         # API + UI on :8080 (Node)
