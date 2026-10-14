@@ -4,7 +4,7 @@
 import { fromAffinities, handoffScore, type OverlapMatrix } from "./matrix/overlap.js";
 import type { Candidate, Demographics, Entity, QlooClient } from "./qloo/types.js";
 import { DAYPARTS, DEFAULT_CLOCK, demographicFit, fitFunction, weakDayparts, type DaypartGap } from "./solver/dayparts.js";
-import { solve, type SolveResult, type SolverInput, type SolverShow } from "./solver/solve.js";
+import { annotate, scoreSequence, solve, type SolveResult, type SolverInput, type SolverShow } from "./solver/solve.js";
 
 export interface LibraryItem {
   name: string;
@@ -24,8 +24,12 @@ export interface PlanOptions {
   adLoad?: number;
   /** Dayparts whose mean fit falls below this get licensing suggestions. Default 0.5. */
   gapThreshold?: number;
-  /** Solver wall-clock budget. Default 1500 ms. */
+  /** Solver wall-clock budget. Default: none for libraries of up to 16 shows (they finish in about 2 s, and the
+   *  same library then always gives the same day, however busy the server), 1500 ms for larger ones. */
   budgetMs?: number;
+  /** Keep this airing order (show IDs) instead of solving: the day the user is looking at, manual moves included.
+   *  Ignored unless it airs exactly the resolved shows, e.g. after the library changed. */
+  order?: string[];
 }
 
 export interface LicenseSuggestion {
@@ -112,7 +116,11 @@ export async function planDay(client: QlooClient, library: LibraryItem[], opts: 
     maxStack: opts.maxStack ?? 2,
     stackScore: 0.6,
   };
-  const schedule = solve(solverInput, { budgetMs: opts.budgetMs ?? 1500 });
+  const ids = new Set(shows.map((s) => s.id));
+  const keep = opts.order?.length && opts.order.every((id) => ids.has(id)) && ids.size === new Set(opts.order).size;
+  const schedule: SolveResult = keep
+    ? { slots: annotate(solverInput, opts.order!).slots, score: scoreSequence(solverInput, opts.order!) ?? -Infinity }
+    : solve(solverInput, { budgetMs: opts.budgetMs ?? (shows.length <= 16 ? Infinity : 1500) });
   const aired = new Set(schedule.slots.map((s) => s.showId));
   const notAired = shows.filter((s) => !aired.has(s.id)).map((s) => s.id);
   const gaps = weakDayparts(schedule.slots, opts.gapThreshold ?? 0.5);

@@ -7,3 +7,10 @@ data/
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+# AI agent instructions and personal notes stay local
+CLAUDE.md
+AGENTS.md
+.claude/
+.agents/
+skills-lock.json

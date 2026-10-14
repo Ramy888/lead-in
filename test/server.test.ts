@@ -5,6 +5,7 @@ import { FakeQlooClient } from "../src/qloo/fake.js";
 import { createApp, type AppOptions } from "../src/server/app.js";
 import { MemoryAgentBudget, RateLimiter } from "../src/server/limits.js";
 import type { AgentModel, AgentReply } from "../src/agent/claude.js";
+import { TmdbClient } from "../src/tmdb/client.js";
 
 const servers: Array<{ close: () => void }> = [];
 afterEach(() => servers.splice(0).forEach((s) => s.close()));
@@ -147,6 +148,17 @@ describe("API agent", () => {
     expect(res.status).toBe(200);
   });
 
+  it("starts from the day on screen: the agent's baseline flow equals the reordered day's flow", async () => {
+    const base = await start({ agent: { model: script() } });
+    const made = (await plan(base, { library: LIB.slice(0, 4) })).lines.at(-1).plan;
+    const seq: string[] = made.schedule.slots.map((s: { showId: string }) => s.showId);
+    const moved = [seq[1]!, seq[0]!, ...seq.slice(2)];
+    const shown = await (await fetch(`${base}/api/plans/${made.id}/score`, { method: "POST", body: JSON.stringify({ sequence: moved }) })).json();
+    const { result } = (await lines(await agentRun(base, { library: LIB.slice(0, 4), brief: "", sequence: moved }))).at(-1);
+    expect(result.baselineFlow).toBe(shown.flow);
+    expect((await agentRun(base, { library: LIB.slice(0, 4), sequence: ["not an id"] })).status).toBe(400);
+  });
+
   it("is off without a model, and refuses runs once the budget or the visitor's limit is spent", async () => {
     const off = await start();
     expect(await (await fetch(`${off}/api/health`)).json()).toMatchObject({ agent: false });
@@ -229,5 +241,54 @@ describe("flowScore", () => {
     const slot = (showId: string, handoffScore: number) => ({ showId, startUnit: 0, units: 1, fit: 0.5, handoffScore, weakHandoff: false });
     // A→A is a stack (0.6), A→B 0.2, B→A 0.4: flow is the mean of the real handoffs only.
     expect(flowScore([slot("A", 0.6), slot("A", 0.2), slot("B", 0.4)])).toBe(0.3);
+  });
+});
+
+describe("TMDB lookup for adding a show", () => {
+  const tmdbStub = () => {
+    let calls = 0;
+    const fetchFn = (async (input: string | URL) => {
+      calls++;
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") {
+        const q = url.searchParams.get("query")?.toLowerCase();
+        const results = q === "columbo" ? [{ id: 1630, name: "Columbo", first_air_date: "1971-09-15", overview: "A detective.", poster_path: "/c.jpg" }] : [];
+        return Response.json({ results });
+      }
+      if (url.pathname === "/3/tv/1630") return Response.json({ id: 1630, name: "Columbo", first_air_date: "1971-09-15", episode_run_time: [76], genres: [] });
+      if (url.pathname === "/3/tv/99") return Response.json({ id: 99, name: "No runtimes", episode_run_time: [] });
+      if (url.pathname === "/3/tv/99/season/1") return Response.json({ episodes: [] });
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    return { tmdb: new TmdbClient({ token: "t", fetchFn }), calls: () => calls };
+  };
+
+  it("searches TMDB and caches the answer, so a retyped query costs no TMDB call", async () => {
+    const stub = tmdbStub();
+    const base = await start({ tmdb: stub.tmdb });
+    const res = await fetch(`${base}/api/tmdb/search?q=${encodeURIComponent(" Columbo ")}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ results: [{ tmdbId: 1630, name: "Columbo", year: 1971, overview: "A detective.", posterPath: "/c.jpg" }] });
+    await fetch(`${base}/api/tmdb/search?q=columbo`);
+    expect(stub.calls()).toBe(1);
+    expect(await (await fetch(`${base}/api/tmdb/search?q=zzz`)).json()).toEqual({ results: [] });
+  });
+
+  it("returns a picked show's runtime, and 404 when TMDB has no runtime for it", async () => {
+    const base = await start({ tmdb: tmdbStub().tmdb });
+    const ok = await fetch(`${base}/api/tmdb/shows/1630`);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ tmdbId: 1630, name: "Columbo", year: 1971, runtimeMinutes: 76 });
+    expect((await fetch(`${base}/api/tmdb/shows/99`)).status).toBe(404);
+    expect((await fetch(`${base}/api/tmdb/shows/abc`)).status).toBe(404);
+  });
+
+  it("rejects empty or overlong queries, answers 503 without TMDB, and rate-limits", async () => {
+    const base = await start({ tmdb: tmdbStub().tmdb, tmdbLimiter: new RateLimiter(2, 0) });
+    expect((await fetch(`${base}/api/tmdb/search?q=`)).status).toBe(400);
+    expect((await fetch(`${base}/api/tmdb/search?q=${"a".repeat(101)}`)).status).toBe(400);
+    expect((await fetch(`${base}/api/tmdb/search?q=columbo`)).status).toBe(429);
+    const none = await start();
+    expect((await fetch(`${none}/api/tmdb/search?q=columbo`)).status).toBe(503);
   });
 });

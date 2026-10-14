@@ -137,6 +137,15 @@ describe("runAgent", () => {
     expect(result.stoppedBecause).toMatch(/token budget/);
   });
 
+  it("starts from the day on screen when its order is given, so its numbers match the dial", async () => {
+    const { model } = scripted([]);
+    const first = await runAgent({ model, qloo: new FakeQlooClient() }, { library: LIBRARY, brief: "" });
+    const order = first.baseline.schedule.slots.map((s) => s.showId);
+    const moved = [order[1]!, order[0]!, ...order.slice(2)];
+    const result = await runAgent({ model: scripted([]).model, qloo: new FakeQlooClient() }, { library: LIBRARY, brief: "", order: moved });
+    expect(result.baseline.schedule.slots.map((s) => s.showId)).toEqual(moved);
+  });
+
   it("nudges a model that answers in prose instead of calling finish", async () => {
     const { model, seen } = scripted(["I think it's fine."]);
     const result = await runAgent({ model, qloo: new FakeQlooClient() }, { library: LIBRARY, brief: "" });

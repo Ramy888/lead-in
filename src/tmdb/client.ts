@@ -11,6 +11,15 @@ export interface ImportedShow {
   posterPath?: string;
 }
 
+/** A search hit for the add-show picker: enough to tell same-named shows apart, nothing fetched per result. */
+export interface ShowMatch {
+  tmdbId: number;
+  name: string;
+  year?: number;
+  overview: string;
+  posterPath?: string;
+}
+
 interface Options {
   /** TMDB v4 read access token (preferred) or v3 API key. */
   token?: string;
@@ -45,6 +54,24 @@ export class TmdbClient {
     return (await res.json()) as T;
   }
 
+  /** TV shows matching what the user typed, best first (TMDB's order), at most six. */
+  async searchShows(query: string): Promise<ShowMatch[]> {
+    const search = await this.get<{
+      results: Array<{ id: number; name: string; first_air_date?: string; overview?: string; poster_path?: string | null }>;
+    }>("/search/tv", { query });
+    return search.results.slice(0, 6).map((r) => {
+      const year = r.first_air_date ? Number(r.first_air_date.slice(0, 4)) : undefined;
+      const overview = (r.overview ?? "").trim();
+      return {
+        tmdbId: r.id,
+        name: r.name,
+        ...(year ? { year } : {}),
+        overview: overview.length > 160 ? overview.slice(0, 159) + "…" : overview,
+        ...(r.poster_path ? { posterPath: r.poster_path } : {}),
+      };
+    });
+  }
+
   /** `year` (first air year) picks the original over a same-named remake. */
   async importShow(name: string, year?: number): Promise<ImportedShow | null> {
     const search = await this.get<{ results: Array<{ id: number }> }>("/search/tv", {
@@ -52,8 +79,12 @@ export class TmdbClient {
       ...(year ? { first_air_date_year: String(year) } : {}),
     });
     const hit = search.results[0];
-    if (!hit) return null;
+    return hit ? this.showById(hit.id) : null;
+  }
 
+  /** Full record for one show; null when TMDB has no episode runtime for it. */
+  async showById(id: number): Promise<ImportedShow | null> {
+    const hit = { id };
     const details = await this.get<{
       id: number;
       name: string;

@@ -8,6 +8,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="styles.css">
+  <script src="theme.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -19,90 +20,160 @@
         <p class="tagline">Program a FAST channel by audience flow: every show hands its audience to the next.</p>
       </div>
     </div>
-    <div id="source-badge" class="badge" hidden></div>
+    <div class="appbar-actions">
+      <div id="source-badge" class="badge" hidden></div>
+      <button id="help-btn" class="icon-round" type="button" aria-label="How Lead-In works" title="How it works" aria-haspopup="dialog" aria-controls="welcome">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7M12 17.2v.1"/></svg>
+      </button>
+      <button id="theme-btn" class="icon-round" type="button" aria-label="Switch to light mode" title="Light / dark">
+        <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      </button>
+      <button id="drawer-btn" class="icon-round with-label" type="button" aria-haspopup="dialog" aria-controls="drawer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        <span>Insights</span>
+      </button>
+    </div>
   </header>
 
   <main class="layout">
     <section class="setup panel" aria-labelledby="setup-title">
       <h2 id="setup-title">1 · Your library</h2>
-      <div id="presets" class="presets" role="radiogroup" aria-label="Demo libraries"></div>
-
-      <ul id="library" class="library" aria-label="Shows in the library"></ul>
-      <form id="add-show" class="add-show">
-        <label class="sr-only" for="new-name">Show title</label>
-        <input id="new-name" placeholder="Add a show title" maxlength="100" autocomplete="off">
-        <label class="sr-only" for="new-runtime">Episode minutes</label>
-        <input id="new-runtime" type="number" min="5" max="240" placeholder="min" title="Episode runtime in minutes; leave blank to look it up on TMDB">
-        <button type="submit" class="ghost">Add</button>
-      </form>
-
-      <button id="plan-btn" class="primary">Plan the 24h channel</button>
+      <button id="plan-btn" class="primary" disabled aria-describedby="plan-hint">Plan the 24h channel</button>
+      <p id="plan-hint" class="plan-hint">Pick a library below to start.</p>
       <div id="progress" class="progress" aria-live="polite"></div>
-      <div id="needs-input" class="needs-input" aria-live="polite"></div>
-
-      <div id="agent-box" class="agent-box" hidden>
-        <h2>3 · Ask the agent</h2>
-        <p class="hint">Claude reads your goal, asks Qloo for titles that bridge weak spots, tests what-ifs on the schedule and recommends a change, or none.</p>
-        <label class="sr-only" for="brief">Your goal for the channel</label>
-        <textarea id="brief" maxlength="500" rows="3" placeholder="e.g. Late night is weak. I can license one or two titles."></textarea>
-        <div id="examples" class="examples"></div>
-        <button id="agent-btn" class="primary">Run the agent</button>
-        <div id="agent-progress" class="progress" aria-live="polite"></div>
+      <div id="presets" class="presets" aria-label="Libraries"></div>
+      <div id="library-parts" hidden>
+        <ul id="library" class="library" aria-label="Shows in the library"></ul>
       </div>
+      <div id="needs-input" class="needs-input" aria-live="polite"></div>
     </section>
 
     <section class="schedule panel" aria-labelledby="schedule-title">
       <div class="schedule-head">
         <h2 id="schedule-title">2 · The day</h2>
-        <div id="flow" class="flow" aria-live="polite"></div>
+        <div id="legend" class="strip-legend" hidden></div>
       </div>
-      <div id="strip" class="strip" aria-hidden="true"></div>
+      <div id="intro" class="empty-day">
+        <div class="sky" aria-hidden="true">
+          <span class="sun"></span>
+          <span class="moon"></span>
+          <span class="stars"></span>
+          <svg class="horizon" viewBox="0 0 520 280" preserveAspectRatio="xMidYMax meet" focusable="false">
+            <path d="M20 268 A240 240 0 0 1 500 268"/>
+            <text x="20" y="262" text-anchor="start">06:00</text>
+            <text x="260" y="50" text-anchor="middle">18:00</text>
+            <text x="500" y="262" text-anchor="end">06:00</text>
+          </svg>
+        </div>
+        <div class="empty-card">
+          <h3>Your 24-hour channel appears here</h3>
+          <p>Pick a library, then plan the day. Lead-In lays every show on a dial from morning to night and marks where viewers stay or leave.</p>
+          <button id="empty-plan" class="primary" type="button" disabled>Plan the 24h channel</button>
+          <p id="empty-hint" class="empty-hint">Pick a library first.</p>
+        </div>
+      </div>
+      <div id="planning" class="planning" hidden aria-live="polite">
+        <div class="arc-skeleton" aria-hidden="true"></div>
+        <p id="planning-text">Asking Qloo how each show's audience overlaps with the others…</p>
+      </div>
+      <p id="schedule-hint" class="hint" hidden></p>
+      <div id="dial" class="dial" hidden>
+        <svg id="arc" class="arc" role="group" aria-label="The 24-hour day, 06:00 to 06:00"></svg>
+        <div id="hub" class="hub"></div>
+      </div>
       <div id="violations" class="violations" aria-live="polite"></div>
-      <p id="schedule-hint" class="hint">Pick a library and plan the channel. Then drag shows to try your own order, and Lead-In re-scores every handoff.</p>
-      <ol id="grid" class="grid"></ol>
-      <button id="reset-btn" class="ghost" hidden>Back to Lead-In's plan</button>
+      <div id="detail" class="detail" aria-live="polite"></div>
     </section>
-
-    <aside class="insights panel" aria-labelledby="insights-title">
-      <h2 id="insights-title" class="sr-only">Insights</h2>
-      <div class="tabs" role="tablist">
-        <button role="tab" aria-selected="true" data-tab="gaps">Gaps &amp; licensing</button>
-        <button role="tab" aria-selected="false" data-tab="agent" id="agent-tab" hidden>Agent</button>
-        <button role="tab" aria-selected="false" data-tab="compare">vs AI alone</button>
-        <button role="tab" aria-selected="false" data-tab="matrix">Overlap matrix</button>
-        <button role="tab" aria-selected="false" data-tab="trace">Qloo calls</button>
-        <button role="tab" aria-selected="false" data-tab="how">How it works</button>
-      </div>
-      <div id="tab-gaps" class="tab" role="tabpanel"></div>
-      <div id="tab-agent" class="tab" role="tabpanel" hidden></div>
-      <div id="tab-compare" class="tab" role="tabpanel" hidden>
-        <p class="empty">Plan a channel first, then compare it with the same day built without Qloo.</p>
-      </div>
-      <div id="tab-matrix" class="tab" role="tabpanel" hidden></div>
-      <div id="tab-trace" class="tab" role="tabpanel" hidden></div>
-      <div id="tab-how" class="tab" role="tabpanel" hidden>
-        <h3>What comes from where</h3>
-        <dl class="legend">
-          <dt><span class="tag qloo">Qloo says</span></dt>
-          <dd>How strongly fans of one show also like another (Qloo affinity, shown raw in the matrix tooltips), each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
-          <dt><span class="tag ours">Our read</span></dt>
-          <dd>The handoff score: Qloo's affinities sit in a narrow band (about 0.76 for unrelated shows to 0.97 for close neighbours), so Lead-In maps 0.86 and below to 0 and 0.975 to 1; a raw affinity under about 0.90 reads as a weak handoff. Also who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
-          <dt><span class="tag agent">Agent</span></dt>
-          <dd>Claude (Anthropic) decides what to investigate and what to test, using only the tools above: Qloo lookups and what-if re-plans. It must quote only numbers the tools returned, and it files them under "Qloo says" or "Our read".</dd>
-          <dt><span class="tag tmdb">TMDB</span></dt>
-          <dd>Episode runtimes, which set slot lengths (runtime plus about 12% ad load, rounded up to half hours).</dd>
-        </dl>
-        <h3>How the day is built</h3>
-        <ol class="steps">
-          <li>Resolve each title to a Qloo entity. Ambiguous titles ask you to choose.</li>
-          <li>Get each show's audience skew and score its fit for every daypart.</li>
-          <li>Build a one-way overlap matrix: for each show, ask Qloo how much its fans like every other show in the library (one call per show).</li>
-          <li>Search for the 24h loop with the best total of handoffs plus daypart fit. Every show airs at least once (when the library fits), and runs of the same show are capped.</li>
-          <li>Flag weak handoffs and dayparts the library serves poorly, then ask Qloo which titles would fill them.</li>
-        </ol>
-      </div>
-    </aside>
   </main>
+
+  <dialog id="welcome" class="modal welcome" aria-labelledby="welcome-title">
+    <div class="welcome-head">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <p class="eyebrow">Welcome to Lead-In</p>
+        <h2 id="welcome-title">Keep viewers watching from one show to the next</h2>
+      </div>
+    </div>
+    <p>Free streaming TV channels (FAST, like Pluto TV, Tubi or Samsung TV Plus) lose viewers whenever the next show doesn't suit the audience of the last one.</p>
+    <p>Lead-In asks <strong>Qloo</strong> how much each show's audience likes every other show, then orders a 24-hour day so each show hands its audience to the next, and shows where it can't.</p>
+    <ol class="welcome-steps">
+      <li><span class="n">1</span><div><strong>Pick a library</strong><span>One of three demo libraries, or add your own shows.</span></div></li>
+      <li><span class="n">2</span><div><strong>Plan the day</strong><span>Live Qloo data builds the 24-hour dial in about 10 seconds.</span></div></li>
+      <li><span class="n">3</span><div><strong>Fix the weak spots</strong><span>Ask the Claude agent, and see in <em>Insights</em> how the day compares with AI alone.</span></div></li>
+    </ol>
+    <p class="src">On the three demo libraries, Lead-In's days beat the same Claude model scheduling without Qloo, e.g. audience flow 0.82 vs 0.66 on Classic TV Mix (scored on Qloo's audience overlap).</p>
+    <button id="welcome-ok" class="primary" type="button">I understand</button>
+  </dialog>
+
+  <dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <h2 id="drawer-title">Insights</h2>
+      <button class="icon-btn close" type="button" data-close aria-label="Close insights">✕</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="gaps">Gaps &amp; licensing</button>
+      <button role="tab" aria-selected="false" data-tab="compare">vs AI alone</button>
+      <button role="tab" aria-selected="false" data-tab="matrix">Overlap matrix</button>
+      <button role="tab" aria-selected="false" data-tab="trace">Qloo calls</button>
+      <button role="tab" aria-selected="false" data-tab="how">How it works</button>
+    </div>
+    <div id="tab-gaps" class="tab" role="tabpanel"><p class="empty">Plan a channel to see weak dayparts and titles to license.</p></div>
+    <div id="tab-compare" class="tab" role="tabpanel" hidden>
+      <p class="empty">Plan a channel first, then compare it with the same day built without Qloo.</p>
+    </div>
+    <div id="tab-matrix" class="tab" role="tabpanel" hidden><p class="empty">Plan a channel to see how much each show's audience overlaps with every other.</p></div>
+    <div id="tab-trace" class="tab" role="tabpanel" hidden><p class="empty">Plan a channel to see every Qloo call behind it.</p></div>
+    <div id="tab-how" class="tab" role="tabpanel" hidden>
+      <h3>What comes from where</h3>
+      <dl class="legend">
+        <dt><span class="tag qloo">Qloo says</span></dt>
+        <dd>How strongly fans of one show also like another (Qloo affinity, shown raw in the matrix tooltips), each show's aggregate audience skew (age, gender), and titles that share an audience with your library. These are aggregate affinities, never facts about an individual viewer.</dd>
+        <dt><span class="tag ours">Our read</span></dt>
+        <dd>The handoff score: Qloo's affinities sit in a narrow band (about 0.76 for unrelated shows to 0.97 for close neighbours), so Lead-In maps 0.86 and below to 0 and 0.975 to 1; a raw affinity under about 0.90 reads as a weak handoff. Also who typically watches in each daypart, how a show's skew fits that, the cut-off for a weak handoff, and the scheduling itself. These are Lead-In's assumptions, open to argument.</dd>
+        <dt><span class="tag agent">Agent</span></dt>
+        <dd>Claude (Anthropic) decides what to investigate and what to test, using only the tools above: Qloo lookups and what-if re-plans. It must quote only numbers the tools returned, and it files them under "Qloo says" or "Our read".</dd>
+        <dt><span class="tag tmdb">TMDB</span></dt>
+        <dd>Episode runtimes, which set slot lengths (runtime plus about 12% ad load, rounded up to half hours).</dd>
+      </dl>
+      <h3>How the day is built</h3>
+      <ol class="steps">
+        <li>Resolve each title to a Qloo entity. Ambiguous titles ask you to choose.</li>
+        <li>Get each show's audience skew and score its fit for every daypart.</li>
+        <li>Build a one-way overlap matrix: for each show, ask Qloo how much its fans like every other show in the library (one call per show).</li>
+        <li>Search for the 24h loop with the best total of handoffs plus daypart fit. Every show airs at least once (when the library fits), and runs of the same show are capped.</li>
+        <li>Flag weak handoffs and dayparts the library serves poorly, then ask Qloo which titles would fill them.</li>
+      </ol>
+    </div>
+  </dialog>
+
+  <dialog id="agent-dialog" class="modal" aria-labelledby="agent-title">
+    <div class="drawer-head">
+      <h2 id="agent-title">Ask the agent</h2>
+      <button class="icon-btn close" type="button" data-close aria-label="Close">✕</button>
+    </div>
+    <form id="agent-form" class="agent-form" method="dialog">
+      <p class="hint">Claude reads your goal, asks Qloo for titles that bridge weak spots, tests what-ifs on the schedule and recommends a change, or none.</p>
+      <label for="brief">Your goal for the channel</label>
+      <textarea id="brief" maxlength="500" rows="3" placeholder="e.g. Late night is weak. I can license one or two titles."></textarea>
+      <div id="examples" class="examples" aria-label="Example goals"></div>
+      <button id="agent-btn" class="primary" type="submit">Run the agent</button>
+    </form>
+    <div id="agent-progress" class="progress" aria-live="polite"></div>
+    <div id="agent-out"></div>
+  </dialog>
+
+  <dialog id="add-dialog" class="modal" aria-labelledby="add-title">
+    <div class="drawer-head">
+      <h2 id="add-title">Add a show</h2>
+      <button class="icon-btn close" type="button" data-close aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Search TMDB so the show joins with its real episode length and first-air year.</p>
+    <label class="sr-only" for="add-q">Show title</label>
+    <input id="add-q" class="search" type="search" placeholder="Type a TV show title…" maxlength="100" autocomplete="off" spellcheck="false">
+    <div id="add-results" class="add-results" aria-live="polite"></div>
+    <p class="src">Search results from <a href="https://www.themoviedb.org/" rel="noopener">TMDB</a>.</p>
+  </dialog>
 
   <footer class="foot">
     <p>Qloo results are aggregate audience affinities, never facts about any individual viewer. No personal data is sent to Qloo.</p>

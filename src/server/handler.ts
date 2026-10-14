@@ -12,7 +12,7 @@ import { PRESETS } from "../presets.js";
 import { TracingClient } from "../qloo/trace.js";
 import type { QlooClient } from "../qloo/types.js";
 import { annotate } from "../solver/solve.js";
-import type { TmdbClient } from "../tmdb/client.js";
+import type { ImportedShow, ShowMatch, TmdbClient } from "../tmdb/client.js";
 import { MemoryAgentBudget, RateLimiter, TtlStore, type AgentBudget } from "./limits.js";
 import { planView, scoreView } from "./view.js";
 
@@ -25,6 +25,8 @@ export interface HandlerOptions {
   planTimeoutMs?: number;
   planLimiter?: RateLimiter;
   scoreLimiter?: RateLimiter;
+  /** Add-show lookups (TMDB search as the user types, then the picked show). */
+  tmdbLimiter?: RateLimiter;
   /** Where plans wait to be re-scored. Default: in memory for 6 hours. */
   planStore?: PlanStore;
   /** The Claude agent; without it /api/agent answers 503 and the UI hides the agent. */
@@ -134,6 +136,10 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
   // Each run spends Qloo quota and Claude credit: 2 at once per visitor, then one every ~3 minutes.
   const agentLimiter = opts.agent?.limiter ?? new RateLimiter(2, 0.34);
   const compareLimiter = new RateLimiter(3, 1);
+  // Search-as-you-type: generous per visitor, and answers are cached so retyping costs TMDB nothing.
+  const tmdbLimiter = opts.tmdbLimiter ?? new RateLimiter(40, 60);
+  const tmdbSearches = new TtlStore<ShowMatch[]>(500, 60 * 60 * 1000);
+  const tmdbShows = new TtlStore<ImportedShow | null>(500, 24 * 60 * 60 * 1000);
   // One answer per plan: a second click (or another judge on the same preset) costs nothing.
   const comparisons = new TtlStore<Comparison>(200, 6 * 60 * 60 * 1000);
 
@@ -215,9 +221,15 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
     const blocked = agentBudget.blocked();
     if (blocked) throw new HttpError(503, blocked);
     if (!agentLimiter.take(clientKey)) throw new HttpError(429, "Too many agent runs; try again in a few minutes");
-    const body = (await readJson(req, maxBody)) as { brief?: unknown } | null;
+    const body = (await readJson(req, maxBody)) as { brief?: unknown; sequence?: unknown } | null;
     const request = parsePlanRequest(body, maxShows);
     const brief = typeof body?.brief === "string" ? body.brief.slice(0, 500) : "";
+    // The airing order on screen (manual moves included), so the agent starts from the day the user sees.
+    const seq = body?.sequence;
+    if (seq !== undefined && (!Array.isArray(seq) || seq.length > 200 || !seq.every((x) => typeof x === "string" && QLOO_ID.test(x)))) {
+      throw new HttpError(400, "sequence must be an array of Qloo show IDs");
+    }
+    const order = seq as string[] | undefined;
     if (agentsRunning >= 1) throw new HttpError(503, "The agent is busy with another channel; try again shortly");
 
     agentsRunning++;
@@ -255,7 +267,7 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
       }, agent.timeoutMs ?? 120_000);
       try {
         const runtimeOf = async (item: { name: string; year?: number }) => (await withRuntimes([item]))[0]!.runtimeMinutes;
-        const result = await runAgent({ model, qloo: client, runtimeOf }, { library: (await withRuntimes(request.library)), brief }, write, abort.signal);
+        const result = await runAgent({ model, qloo: client, runtimeOf }, { library: (await withRuntimes(request.library)), brief, ...(order ? { order } : {}) }, write, abort.signal);
         write({ type: "agent_done", result: agentView(result, client) });
       } catch (err) {
         const message = abort.signal.aborted ? "The agent took too long and was stopped" : err instanceof Error ? err.message : "Agent failed";
@@ -320,6 +332,38 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
     return jsonResponse(200, result);
   }
 
+  /** TV shows on TMDB matching what the user typed, for the add-show dialog. */
+  async function searchTmdb(req: Request, clientKey: string): Promise<Response> {
+    if (!opts.tmdb) throw new HttpError(503, "Show search isn't available on this server");
+    if (!tmdbLimiter.take(clientKey)) throw new HttpError(429, "Too many searches; slow down a little");
+    const q = (new URL(req.url).searchParams.get("q") ?? "").trim();
+    if (!q || q.length > 100) throw new HttpError(400, "q must be 1–100 characters");
+    const key = q.toLowerCase();
+    let results = tmdbSearches.get(key);
+    if (!results) {
+      results = await opts.tmdb.searchShows(q).catch(() => {
+        throw new HttpError(502, "TMDB didn't answer; try again");
+      });
+      tmdbSearches.set(key, results);
+    }
+    return jsonResponse(200, { results });
+  }
+
+  /** The picked show's runtime and first-air year, so it joins the library with real data. */
+  async function tmdbShow(clientKey: string, id: number): Promise<Response> {
+    if (!opts.tmdb) throw new HttpError(503, "Show search isn't available on this server");
+    if (!tmdbLimiter.take(clientKey)) throw new HttpError(429, "Too many searches; slow down a little");
+    let show = tmdbShows.get(String(id));
+    if (show === undefined) {
+      show = await opts.tmdb.showById(id).catch(() => {
+        throw new HttpError(502, "TMDB didn't answer; try again");
+      });
+      tmdbShows.set(String(id), show);
+    }
+    if (!show) throw new HttpError(404, "TMDB has no episode length for this show");
+    return jsonResponse(200, show);
+  }
+
   async function scorePlan(req: Request, clientKey: string, id: string): Promise<Response> {
     if (!scoreLimiter.take(clientKey)) throw new HttpError(429, "Too many requests");
     const plan = plans.get(id);
@@ -344,6 +388,9 @@ export function createHandler(opts: HandlerOptions): ApiHandler {
       if (req.method === "GET" && path === "/api/presets") return jsonResponse(200, PRESETS);
       if (req.method === "POST" && path === "/api/plans") return await createPlan(req, clientKey);
       if (req.method === "POST" && path === "/api/agent") return await runAgentRequest(req, clientKey);
+      if (req.method === "GET" && path === "/api/tmdb/search") return await searchTmdb(req, clientKey);
+      const tmdbShowPath = path.match(/^\/api\/tmdb\/shows\/(\d{1,9})$/);
+      if (req.method === "GET" && tmdbShowPath) return await tmdbShow(clientKey, Number(tmdbShowPath[1]));
       const score = path.match(/^\/api\/plans\/([0-9a-f-]{36})\/score$/);
       if (req.method === "POST" && score) return await scorePlan(req, clientKey, score[1]!);
       const compare = path.match(/^\/api\/plans\/([0-9a-f-]{36})\/compare$/);

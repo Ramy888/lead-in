@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handoffScore } from "../src/matrix/overlap.js";
 import { planDay, unitsFor } from "../src/pipeline.js";
 import { FakeQlooClient } from "../src/qloo/fake.js";
+import { PRESETS } from "../src/presets.js";
 
 const LIBRARY = [
   { name: "Columbo", runtimeMinutes: 76 },
@@ -63,4 +64,41 @@ describe("planDay with a library longer than a day", () => {
     };
     await expect(planDay(down, LIBRARY)).rejects.toThrow(/Qloo couldn't be reached/);
   });
+});
+
+describe("planDay with a given order (the day on screen)", () => {
+  it("keeps that exact order instead of re-solving, and derives gaps from it", async () => {
+    const lib = LIBRARY.filter((s) => s.name !== "Law");
+    const first = await planDay(new FakeQlooClient(), lib);
+    const order = first.schedule.slots.map((s) => s.showId);
+    const moved = [order[1]!, order[0]!, ...order.slice(2)]; // a manual swap
+    const again = await planDay(new FakeQlooClient(), lib, { order: moved });
+    expect(again.schedule.slots.map((s) => s.showId)).toEqual(moved);
+  });
+
+  it("re-solves when the order doesn't cover exactly the library's shows", async () => {
+    const lib = LIBRARY.filter((s) => s.name !== "Law");
+    const first = await planDay(new FakeQlooClient(), lib);
+    const order = first.schedule.slots.map((s) => s.showId);
+    const stale = order.filter((id) => id !== order[0]); // a show missing: the library changed since
+    const again = await planDay(new FakeQlooClient(), lib, { order: stale });
+    expect(again.schedule.slots.map((s) => s.showId)).toEqual(order);
+  });
+});
+
+describe("planDay is reproducible for demo-size libraries", () => {
+  it("gives the same day on a slow or busy machine as on an idle one", async () => {
+    const lib = PRESETS[0]!.library; // Classic Crime & Action: its polishing takes longer than the old 1.5 s cap
+    const idle = await planDay(new FakeQlooClient(), lib, { budgetMs: Infinity });
+    const realNow = performance.now.bind(performance);
+    let skew = 0;
+    // A busy machine: every clock read looks 2 s later than the last.
+    vi.spyOn(performance, "now").mockImplementation(() => realNow() + (skew += 2000));
+    try {
+      const busy = await planDay(new FakeQlooClient(), lib);
+      expect(busy.schedule.slots.map((s) => s.showId)).toEqual(idle.schedule.slots.map((s) => s.showId));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  }, 60_000);
 });

@@ -56,3 +56,26 @@ describe("TmdbClient.importShow", () => {
     expect(calls[0]!.url).not.toContain("secret-token");
   });
 });
+
+describe("TmdbClient.searchShows", () => {
+  it("returns up to six matches with year, short overview and poster, without fetching details", async () => {
+    const results = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Show ${i + 1}`, first_air_date: i ? "1990-01-01" : "", overview: "x".repeat(400), poster_path: i ? `/p${i}.jpg` : null }));
+    const { fetchFn, calls } = stubFetch({ "/3/search/tv": { results } });
+    const hits = await new TmdbClient({ token: "t", fetchFn }).searchShows("show");
+    expect(hits).toHaveLength(6);
+    expect(hits[0]).toEqual({ tmdbId: 1, name: "Show 1", overview: "x".repeat(159) + "…" });
+    expect(hits[1]).toMatchObject({ tmdbId: 2, year: 1990, posterPath: "/p1.jpg" });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("TmdbClient.showById", () => {
+  it("returns the show's runtime, year and genres for a picked search result", async () => {
+    const { fetchFn } = stubFetch({
+      "/3/tv/1630": { ...COLUMBO, episode_run_time: [], genres: [{ name: "Crime" }] },
+      "/3/tv/1630/season/1": { episodes: [{ runtime: 76 }, { runtime: 75 }, { runtime: 75 }] },
+    });
+    const show = await new TmdbClient({ token: "t", fetchFn }).showById(1630);
+    expect(show).toMatchObject({ tmdbId: 1630, name: "Columbo", year: 1971, runtimeMinutes: 75, genres: ["Crime"] });
+  });
+});

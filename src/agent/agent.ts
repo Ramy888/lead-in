@@ -159,14 +159,15 @@ class ToolError extends Error {}
 
 export async function runAgent(
   deps: AgentDeps,
-  input: { library: LibraryItem[]; brief: string },
+  /** `order`: the airing order on screen, so the agent's starting day (and its numbers) match what the user sees. */
+  input: { library: LibraryItem[]; brief: string; order?: string[] },
   onEvent: (e: AgentEvent) => void = () => {},
   signal?: AbortSignal,
   limits: AgentLimits = DEFAULT_LIMITS,
 ): Promise<AgentResult> {
   const { qloo, model } = deps;
   const runtimeOf = deps.runtimeOf ?? (async () => 45);
-  const baseline = await planDay(qloo, input.library);
+  const baseline = await planDay(qloo, input.library, { ...(input.order ? { order: input.order } : {}) });
   const whatIfs: WhatIf[] = [];
   const usage: AgentUsage = { llmCalls: 0, promptTokens: 0, completionTokens: 0, usd: 0, models: [] };
 

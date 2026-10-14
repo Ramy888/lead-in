@@ -70,13 +70,20 @@ Every Qloo call is recorded in a redacted trace (`src/qloo/trace.ts`) for the re
 ## The app
 
 `npm run dev` serves the API and UI at http://localhost:8080. Pick a library, plan the channel and watch the Qloo calls
-stream in. Then drag shows (or use ↑ ↓) to try your own order: every handoff is re-scored, and weak ones turn red.
-The side panel has weak dayparts with titles to license, the overlap heatmap, and the full Qloo call trace.
+stream in. The day appears as a half-circle dial from 06:00 to 06:00: an outer band of dayparts (weak ones outlined),
+a ring of shows, and a mark at every handoff (red where the audience mostly leaves). **+ Add a show** searches TMDB (skeleton while it loads) so a show joins with its real episode length and year;
+a title TMDB doesn't know can still be added as typed after you confirm a length. Tap a show on the dial to see its handoffs
+and move it earlier or later (every handoff is re-scored); tap a daypart for titles to license. The middle of the dial
+holds the audience-flow score, the weak-handoff and daypart-gap counts with **Fix** buttons, and **Run the agent**,
+which opens a dialog for your goal. The **Insights** drawer (app bar) has the licensing list, "vs AI alone", the
+overlap heatmap and the full Qloo call trace; the app bar also switches light and dark mode.
 
 | Route | What it does |
 |---|---|
 | `GET /api/presets` | Demo libraries |
 | `POST /api/plans` | `{library:[{name, runtimeMinutes?, year?, qlooId?}]}` → NDJSON stream: one `trace` line per Qloo call, then the `plan` |
+| `GET /api/tmdb/search?q=` | TV shows on TMDB matching a typed title (top 6, cached 1 h), for the add-show dialog |
+| `GET /api/tmdb/shows/:tmdbId` | The picked show's episode length and first-air year (404 when TMDB has no length) |
 | `POST /api/plans/:id/score` | `{sequence:[showId…]}` (a reorder of the plan) → re-scored slots and any rule violations |
 | `GET /api/health` | Liveness, plus whether data is synthetic |
 
